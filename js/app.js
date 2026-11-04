@@ -20,6 +20,9 @@
   const knowledgeOutput = document.getElementById('knowledge-output');
   const viewerSection = document.getElementById('viewer-section');
   const viewerOutput = document.getElementById('viewer-output');
+  const mediaAnalysisSection = document.getElementById('media-analysis-section');
+  const mediaAnalysisSummary = document.getElementById('media-analysis-summary');
+  const mediaAnalysisQuestions = document.getElementById('media-analysis-questions');
   const directGoalSection = document.getElementById('direct-goal-section');
   const directGoalForm = document.getElementById('direct-goal-form');
   const directGoalInput = document.getElementById('direct-goal-input');
@@ -45,10 +48,16 @@
         if (match) return match;
       }
     }
-    const renderStep = remaining.find((item) => item.workflowId === 'render-accessible-video' && item.capability && item.capability.canRun);
+    // item.available (when present) is the recommendation engine's own readiness verdict, which
+    // already accounts for real prerequisites like render-accessible-video needing approved
+    // captions and described audio, not just whether a provider is technically installed.
+    // item.capability.canRun alone would say "yes" for render the moment a provider exists, even
+    // with nothing yet to render.
+    const isReady = (item) => item.capability && item.capability.canRun && item.available !== false;
+    const renderStep = remaining.find((item) => item.workflowId === 'render-accessible-video' && isReady(item));
     if (renderStep) return renderStep;
-    return remaining.find((item) => item.workflowId !== 'accessibility-package' && item.capability && item.capability.canRun)
-      || remaining.find((item) => item.capability && item.capability.canRun);
+    return remaining.find((item) => item.workflowId !== 'accessibility-package' && isReady(item))
+      || remaining.find((item) => isReady(item));
   }
 
   function renderCurrentTask() {
@@ -57,18 +66,24 @@
     const completed = intents.filter((item) => item.completed);
     const remaining = intents.filter((item) => !item.completed);
     const nextAvailable = pickNextAction(remaining);
-    if (!completed.length && !nextAvailable) { currentTaskSection.hidden = true; return; }
+    const analysisResults = currentKnowledgeModel ? window.StageOneAnalysis.describeResults(currentKnowledgeModel) : [];
+    if (!completed.length && !analysisResults.length && !nextAvailable) { currentTaskSection.hidden = true; return; }
     currentTaskSection.hidden = false;
-    const completedText = completed.length ? `Completed: ${completed.map((item) => `${item.title}`).join(', ')}.` : 'Nothing completed yet.';
+    // Two different categories, reported as two different sentences: what analysis has determined
+    // is never worded as if it were a created artifact ("Create Transcript"), and a created
+    // artifact is never worded as if it were merely an analysis result.
+    const completedText = completed.length ? `Completed: ${completed.map((item) => `${item.title}`).join(', ')}.` : 'No workflow artifacts completed yet.';
+    const analysisText = analysisResults.length ? ` ${analysisResults.join('. ')}.` : '';
+    const summaryPrefix = `${completedText}${analysisText}`;
     if (nextAvailable) {
-      currentTaskSummary.textContent = `${completedText} Next recommended action: ${nextAvailable.title}.`;
+      currentTaskSummary.textContent = `${summaryPrefix} Next recommended action: ${nextAvailable.title}.`;
       currentTaskNextButton.hidden = false;
       currentTaskNextButton.textContent = nextAvailable.actionLabel || nextAvailable.title;
       currentTaskNextButton.onclick = () => runIntent(nextAvailable);
     } else {
       currentTaskSummary.textContent = remaining.length
-        ? `${completedText} The remaining work needs an assistance service configured in Advanced assistance settings.`
-        : `${completedText} All available work is complete.`;
+        ? `${summaryPrefix} The remaining work needs an assistance service configured in Advanced assistance settings.`
+        : `${summaryPrefix} All available work is complete.`;
       currentTaskNextButton.hidden = true;
     }
   }
@@ -80,13 +95,24 @@
   const progressBar = document.getElementById('progress-bar');
   const progressSteps = document.getElementById('progress-steps');
   let progressTimer = null;
+  // Tracks what was last announced in the one live Workflow Status region (job-status), so
+  // frequent progress ticks (e.g. a render reporting position every 750ms) update the visible
+  // percentage and time without re-announcing anything. A new announcement is only made when the
+  // step changes, the percent crosses a meaningful interval (10/25/50/75/90/100), or the
+  // remaining-time category changes.
+  let lastAnnouncedStepIndex = null;
+  let lastAnnouncedPercentBucket = -1;
+  let lastAnnouncedRemainingCategory = '';
+  const PERCENT_INTERVALS = [10, 25, 50, 75, 90, 100];
   const cancelJobButton = document.getElementById('cancel-job');
   const transcriptReviewSection = document.getElementById('transcript-review-section');
   const transcriptReviewForm = document.getElementById('transcript-review-form');
   const transcriptReviewSummary = document.getElementById('transcript-review-summary');
   const transcriptTitleInput = document.getElementById('transcript-title');
+  const transcriptNoSpeechInput = document.getElementById('transcript-no-speech');
   const transcriptTextInput = document.getElementById('transcript-text');
   const transcriptReviewedInput = document.getElementById('transcript-reviewed');
+  const transcriptReviewedLabelText = document.getElementById('transcript-reviewed-label-text');
   const transcriptReviewStatus = document.getElementById('transcript-review-status');
   const cancelTranscriptReviewButton = document.getElementById('cancel-transcript-review');
   const imageDescriptionReviewSection = document.getElementById('image-description-review-section');
@@ -127,6 +153,7 @@
   const narrationSpeedInput = document.getElementById('narration-speed');
   const narrationVolumeInput = document.getElementById('narration-volume');
   const sourceDuckingInput = document.getElementById('source-ducking');
+  const aiProviderSection = document.getElementById('ai-provider-section');
   const aiProviderOptions = document.getElementById('ai-provider-options');
   const aiProviderStatus = document.getElementById('ai-provider-status');
   const automaticProviderStatus = document.getElementById('automatic-provider-status');
@@ -234,6 +261,15 @@
 
   function setStatus(message) {
     statusRegion.textContent = message;
+  }
+
+  // The Workflow Status region (progress-section / job-status) is the one live region for
+  // Make This Accessible chain-level transitions (start, paused-for-review, complete). Routing
+  // these through here instead of also calling setStatus() for the same event avoids two
+  // different live regions announcing the same thing back to back.
+  function announceWorkflowStatus(message) {
+    progressSection.hidden = false;
+    jobStatus.textContent = message;
   }
 
 
@@ -411,7 +447,31 @@
     return { confirmed: true, notice };
   }
 
-  async function aiContext(includeSourceData) {
+  // extract-audio (which runs before create-transcript in the Make This Accessible chain for
+  // video) produces a separate, much smaller audio-only artifact - a video's audio track is
+  // typically a small fraction of the video's total size, and scales with duration rather than
+  // resolution/bitrate. Speech-related capabilities should send that instead of the original
+  // video wherever it exists, rather than being blocked by a limit that was never really about
+  // the video file itself.
+  function findExtractedAudioArtifact() {
+    if (!currentKnowledgeModel || !currentKnowledgeModel.source || !window.OutputManager) return null;
+    return window.OutputManager.listForSource(currentKnowledgeModel.source)
+      .find((artifact) => artifact.workflowId === 'extract-audio' && artifact.mimeType && artifact.mimeType.indexOf('audio/') === 0 && artifact.url);
+  }
+
+  function effectiveTranscriptionSourceSize() {
+    const audioArtifact = findExtractedAudioArtifact();
+    if (audioArtifact && Number.isFinite(audioArtifact.size)) return audioArtifact.size;
+    // For video, extract-audio runs automatically first in the Make This Accessible chain and
+    // produces a file that's typically a small fraction of the original's size. Before that's
+    // happened, the honest answer is "not yet known" rather than judging by the raw video, which
+    // would otherwise ask an avoidable question before extraction even had a chance to run.
+    if (currentInspection && currentInspection.mediaType === 'video') return null;
+    return currentFile instanceof File ? currentFile.size : null;
+  }
+
+  async function aiContext(includeSourceData, options) {
+    const preferExtractedAudio = Boolean(options && options.preferExtractedAudio);
     const transcriptArtifacts = window.OutputManager.listForSource(currentKnowledgeModel && currentKnowledgeModel.source)
       .filter((artifact) => artifact.workflowId === 'create-transcript');
     const transcript = transcriptTextInput.value.trim() || (transcriptArtifacts.find((artifact) => artifact.content) || {}).content || '';
@@ -421,20 +481,36 @@
       durationSeconds: currentInspection ? currentInspection.durationSeconds : 0,
       transcriptText: transcript.replace(/^.*?\n\nSource:.*?\nCreated:.*?\nReviewed:.*?\n\n/s, ''),
       knowledge: currentKnowledgeModel || {},
-      sourceData: includeSourceData ? await readSourceData(currentFile) : null
+      sourceData: includeSourceData ? await readSourceData(currentFile, preferExtractedAudio) : null
     };
   }
 
-  async function readSourceData(file) {
-    if (!(file instanceof File)) throw new Error('This task requires a file from your device.');
-    const maximumBytes = 50 * 1024 * 1024;
-    if (file.size > maximumBytes) throw new Error('This connected-service build currently supports source files up to 50 MB. Use a smaller copy or a local service endpoint that accepts the same request schema.');
-    const buffer = await file.arrayBuffer();
+  const CONNECTED_SERVICE_MAX_BYTES = 50 * 1024 * 1024;
+
+  async function readSourceData(file, preferExtractedAudio) {
+    let sourceFile = file;
+    let sourceLabel = 'the original file';
+    if (preferExtractedAudio) {
+      const audioArtifact = findExtractedAudioArtifact();
+      if (audioArtifact) {
+        const blob = await (await fetch(audioArtifact.url)).blob();
+        sourceFile = new File([blob], audioArtifact.name || 'extracted-audio', { type: audioArtifact.mimeType });
+        sourceLabel = 'the extracted audio copy';
+      }
+    }
+    if (!(sourceFile instanceof File)) throw new Error('This task requires a file from your device.');
+    if (sourceFile.size > CONNECTED_SERVICE_MAX_BYTES) {
+      const suggestion = preferExtractedAudio && sourceLabel === 'the original file'
+        ? ' Running Extract the Audio first usually produces a much smaller file this can use instead.'
+        : '';
+      throw new Error(`This connected-service build currently supports files up to 50 MB, and ${sourceLabel} is larger than that.${suggestion} Use a smaller copy or a local service endpoint that accepts larger requests.`);
+    }
+    const buffer = await sourceFile.arrayBuffer();
     const bytes = new Uint8Array(buffer);
     let binary = '';
     const chunkSize = 0x8000;
     for (let index = 0; index < bytes.length; index += chunkSize) binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
-    return { name: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, base64: btoa(binary) };
+    return { name: sourceFile.name, mimeType: sourceFile.type || 'application/octet-stream', size: sourceFile.size, base64: btoa(binary) };
   }
 
   // A request completing without throwing does not mean it produced a usable transcript.
@@ -464,7 +540,7 @@
     try {
       const options = { confirmed };
       if (forceProviderId) options.providerId = forceProviderId;
-      result = await window.AIProviderLayer.run('transcription-draft', await aiContext(true), options);
+      result = await window.AIProviderLayer.run('transcription-draft', await aiContext(true, { preferExtractedAudio: true }), options);
     } catch (error) {
       const attempted = forceProviderId || (error && error.providerId);
       return handleTranscriptFailure(error, attempted ? triedProviderIds.concat(attempted) : triedProviderIds, confirmed);
@@ -516,7 +592,7 @@
     try {
       const options = { confirmed: approval.confirmed };
       if (forceProviderId) options.providerId = forceProviderId;
-      result = await window.AIProviderLayer.run('caption-draft', await aiContext(true), options);
+      result = await window.AIProviderLayer.run('caption-draft', await aiContext(true, { preferExtractedAudio: true }), options);
     } catch (error) {
       const attempted = forceProviderId || (error && error.providerId);
       return handleCaptionFailure(error, attempted ? triedProviderIds.concat(attempted) : triedProviderIds);
@@ -540,8 +616,11 @@
     cues.forEach((cue) => addCaptionCue(cue));
     captionCueEditor.open = false;
     const durationCovered = cues.length ? formatDuration((window.CaptionReview.timestampToSeconds(cues[cues.length - 1].end) || 0) * 1000) : '0 seconds';
-    captionReviewSummary.textContent = `Caption draft ready. ${cues.length} cue${cues.length === 1 ? '' : 's'}. Duration covered: ${durationCovered}. Timing validation ${errors.length ? 'repaired automatically' : 'passed'}.${repairNote} Review with the Viewer, then confirm and save, or use Edit individual caption cues for detailed changes.`;
-    captionReviewStatus.textContent = `${result.providerName} created the draft.`;
+    // captionReviewSummary is the one live announcement for this event, and receives focus right
+    // after — a second live region (captionReviewStatus) announcing the same "draft ready" news at
+    // the same moment risks exactly the kind of announcement collision a screen reader can garble
+    // when it lands alongside a burst of newly-inserted cue fields.
+    captionReviewSummary.textContent = `Caption draft ready from ${result.providerName}. ${cues.length} cue${cues.length === 1 ? '' : 's'}. Duration covered: ${durationCovered}. Timing validation ${errors.length ? 'repaired automatically' : 'passed'}.${repairNote} Review with the Viewer, then confirm and save, or use Edit individual caption cues for detailed changes.`;
     captionReviewSummary.focus();
   }
 
@@ -610,7 +689,7 @@
     if (critic) {
       try {
         audioDescriptionReviewStatus.textContent = `Asking ${critic.name} to review the draft for missing visuals, redundancy, and timing conflicts.`;
-        const critiqueContext = Object.assign(await aiContext(true), { priorDraftCues: cues });
+        const critiqueContext = Object.assign(await aiContext(true, { preferExtractedAudio: true }), { priorDraftCues: cues });
         const critiqueResult = await window.AIProviderLayer.run('audio-description-draft', critiqueContext, { confirmed: true, providerId: critic.id });
         const critiqued = Array.isArray(critiqueResult.cues) ? critiqueResult.cues.filter((cue) => String(cue.text || '').trim()) : [];
         const critiqueErrors = window.AudioDescriptionReview.validate(critiqued, currentInspection.durationSeconds);
@@ -678,6 +757,7 @@
     resetViewer();
     resetKnowledge();
     resetAssessment();
+    resetMediaAnalysis();
     resetRecommendations();
     resetPlan();
     resetProgress();
@@ -700,6 +780,8 @@
       currentInspection = await window.MediaInspector.inspect(file);
       renderInspection(currentInspection);
       renderAssessment(currentInspection);
+      renderMediaAnalysis();
+      runAutomaticAudioAnalysis(file);
       renderPlan(currentInspection);
       renderRecommendations(currentInspection);
       renderKnowledge();
@@ -769,6 +851,7 @@
     resetViewer();
     resetKnowledge();
     resetAssessment();
+    resetMediaAnalysis();
     resetRecommendations();
     resetPlan();
     resetProgress();
@@ -797,6 +880,7 @@
 
       renderInspection(currentInspection);
       renderAssessment(currentInspection);
+      renderMediaAnalysis();
       renderPlan(currentInspection);
       renderRecommendations(currentInspection);
       renderKnowledge();
@@ -888,6 +972,177 @@
     assessmentSection.hidden = true;
     assessmentSummary.textContent = 'The assessment will appear after the source is checked.';
     assessmentOutput.innerHTML = '';
+  }
+
+  // Stage 1, per docs/Stage 1 Engine-Orchestrated Analysis Directive.md: shows what is actually
+  // known about the source and, for anything unresolved, either explains that a real engine will
+  // resolve it or offers a direct, explicit question — never silently assumes a fixed pipeline
+  // (e.g. "video has audio, so a transcript is required") from the media type alone.
+  // Runs real local audio-signal analysis (js/audio-signal-analysis.js) automatically once per
+  // source, instead of asking the person a question the assistant could answer itself. Only
+  // resolves anything when the measurement is reliable (essentially silent); otherwise it leaves
+  // the question genuinely unresolved and explains why, rather than guessing.
+  async function runAutomaticAudioAnalysis(file) {
+    if (!currentKnowledgeModel || !currentKnowledgeModel.audio || !currentKnowledgeModel.audio.present) return;
+    if (currentKnowledgeModel.audio.speech.status !== 'not-analyzed') return; // already resolved, e.g. restored from a prior session
+    if (!window.AudioSignalAnalysis || !(file instanceof File)) return;
+    const analyzedFile = file;
+    currentKnowledgeModel.audio.speech.analyzing = true;
+    renderMediaAnalysis();
+    const result = await window.AudioSignalAnalysis.analyzeAudioTrack(file);
+    // If the source changed while this was running, the result no longer applies to what's on screen.
+    if (currentFile !== analyzedFile || !currentKnowledgeModel) return;
+    currentKnowledgeModel.audio.speech.analyzing = false;
+    if (result.supported && result.essentiallySilent) {
+      currentKnowledgeModel.audio.speech.status = 'silence-detected';
+      window.SharedKnowledge.save(currentKnowledgeModel);
+    } else {
+      currentKnowledgeModel.audio.speech.localAnalysisNote = result.supported ? 'has-audio-content' : 'unsupported';
+    }
+    renderMediaAnalysis();
+    renderCurrentTask();
+  }
+
+  // Keeps model.audio.speech.engineFileTooLarge in sync with reality, so Stage 1 never claims "an
+  // engine will handle this automatically" for a file that's already known to exceed that engine's
+  // size limit - the same check openTranscriptReview makes before actually attempting a draft,
+  // run here too so the mismatch is caught before the person is routed into a workflow expecting
+  // it to just work.
+  function updateEngineFileCompatibility() {
+    if (!currentKnowledgeModel || !currentKnowledgeModel.audio) return;
+    const capability = window.AIProviderLayer.getCapability('transcription-draft');
+    const effectiveSize = effectiveTranscriptionSourceSize();
+    const tooLarge = Boolean(capability.canRun && capability.provider && capability.provider.external
+      && Number.isFinite(effectiveSize) && effectiveSize > CONNECTED_SERVICE_MAX_BYTES);
+    if (currentKnowledgeModel.audio.speech.engineFileTooLarge !== tooLarge) {
+      currentKnowledgeModel.audio.speech.engineFileTooLarge = tooLarge;
+    }
+  }
+
+  function renderMediaAnalysis() {
+    if (!currentKnowledgeModel) { mediaAnalysisSection.hidden = true; return; }
+    updateEngineFileCompatibility();
+    const status = window.StageOneAnalysis.resolve(currentKnowledgeModel);
+    if (!status.questions.length) { mediaAnalysisSection.hidden = true; return; }
+    mediaAnalysisSection.hidden = false;
+
+    if (!status.unresolved.length) {
+      mediaAnalysisSummary.textContent = 'Media analysis is complete for what this source needs.';
+      mediaAnalysisQuestions.innerHTML = status.questions.map(describeResolvedQuestion).join('');
+      return;
+    }
+
+    mediaAnalysisSummary.textContent = `Media analysis is not yet complete. ${status.unresolved.length} question${status.unresolved.length === 1 ? '' : 's'} must be resolved before Make This Accessible can build an accurate plan.`;
+    mediaAnalysisQuestions.innerHTML = status.questions.map((question) => {
+      if (question.resolved) return describeResolvedQuestion(question);
+      if (question.id === 'speech') {
+        if (question.analyzing) {
+          return `<div class="media-analysis-question">
+            <p>Analyzing the audio track automatically. This does not require an answer from you unless the automatic analysis can't determine it.</p>
+          </div>`;
+        }
+        const note = currentKnowledgeModel.audio.speech.localAnalysisNote;
+        const explanation = note === 'has-audio-content'
+          ? 'Automated analysis of the audio track found real sound content, but this build cannot automatically tell spoken dialogue apart from music, wind, or other non-speech sound.'
+          : note === 'unsupported'
+            ? "Automated analysis could not be run on this file's audio track (the browser could not decode it)."
+            : '';
+        if (question.engineAvailable) {
+          return `<div class="media-analysis-question">
+            ${explanation ? `<p>${escapeHtml(explanation)}</p>` : ''}
+            <p>Whether this recording contains spoken dialogue: speech analysis will run using ${escapeHtml(question.providerName || 'the configured assistance service')} when you begin.</p>
+          </div>`;
+        }
+        const reasonText = question.engineFileTooLarge
+          ? `Speech analysis has not been completed because this file is larger than the configured speech-analysis service accepts.`
+          : 'Speech analysis has not been completed because no working speech-analysis engine is configured.';
+        return `<div class="media-analysis-question">
+          ${explanation ? `<p>${escapeHtml(explanation)}</p>` : ''}
+          <p>${escapeHtml(reasonText)}</p>
+          <div class="next-actions">
+            <button type="button" id="configure-speech-engine">Configure a speech-analysis engine</button>
+            <button type="button" id="report-speech-present">This recording has spoken dialogue</button>
+            <button type="button" id="report-speech-none">This recording has little or no spoken dialogue</button>
+          </div>
+        </div>`;
+      }
+      if (question.id === 'nonSpeechAudio') {
+        return `<div class="media-analysis-question">
+          <p>No spoken dialogue was found, so a transcript isn't needed. Are there meaningful non-speech sounds — music, narration-like sound effects, significant environmental audio — that someone who can't hear this recording would need described in captions?</p>
+          <div class="next-actions">
+            <button type="button" id="report-non-speech-present">Yes, there are meaningful sounds</button>
+            <button type="button" id="report-non-speech-none">No, captions aren't needed</button>
+          </div>
+        </div>`;
+      }
+      return '';
+    }).join('');
+
+    const configureButton = document.getElementById('configure-speech-engine');
+    if (configureButton) configureButton.addEventListener('click', openAssistanceSettings);
+    const presentButton = document.getElementById('report-speech-present');
+    if (presentButton) presentButton.addEventListener('click', () => recordSpeechAnswer('reported-present'));
+    const noneButton = document.getElementById('report-speech-none');
+    if (noneButton) noneButton.addEventListener('click', () => recordSpeechAnswer('reported-none'));
+    const nonSpeechPresentButton = document.getElementById('report-non-speech-present');
+    if (nonSpeechPresentButton) nonSpeechPresentButton.addEventListener('click', () => recordNonSpeechAudioAnswer('reported-present'));
+    const nonSpeechNoneButton = document.getElementById('report-non-speech-none');
+    if (nonSpeechNoneButton) nonSpeechNoneButton.addEventListener('click', () => recordNonSpeechAudioAnswer('reported-none'));
+  }
+
+  function describeResolvedQuestion(question) {
+    if (question.id === 'speech') {
+      const label = question.status === 'silence-detected'
+        ? 'Automated audio analysis found this recording is essentially silent throughout, so it has neither spoken dialogue nor significant other sound.'
+        : question.status === 'reported-none'
+          ? 'You indicated this recording has little or no spoken dialogue.'
+          : question.status === 'reported-present'
+            ? 'You indicated this recording has spoken dialogue.'
+            : `Speech analysis will run using ${escapeHtml(question.providerName || 'the configured assistance service')} when you begin.`;
+      return `<p>${escapeHtml(label)}</p>`;
+    }
+    if (question.id === 'nonSpeechAudio') {
+      const label = question.status === 'silence-detected'
+        ? '' // already covered by the speech question's message above
+        : question.status === 'reported-present'
+          ? 'You indicated there are meaningful non-speech sounds, so captions will be created for them.'
+          : 'You indicated there are no meaningful non-speech sounds, so captions are not required for this recording.';
+      return label ? `<p>${escapeHtml(label)}</p>` : '';
+    }
+    return '';
+  }
+
+  function recordNonSpeechAudioAnswer(status) {
+    if (!currentKnowledgeModel) return;
+    if (!currentKnowledgeModel.audio.nonSpeechSignificant) currentKnowledgeModel.audio.nonSpeechSignificant = {};
+    currentKnowledgeModel.audio.nonSpeechSignificant.status = status;
+    window.SharedKnowledge.save(currentKnowledgeModel);
+    renderMediaAnalysis();
+    renderCurrentTask();
+    mediaAnalysisSection.focus();
+  }
+
+  function openAssistanceSettings() {
+    const outerDetails = aiProviderSection.querySelector('details');
+    if (outerDetails) outerDetails.open = true;
+    const advancedDetails = document.getElementById('advanced-provider-settings');
+    if (advancedDetails) advancedDetails.open = true;
+    aiProviderSection.scrollIntoView();
+    document.getElementById('ai-provider-heading').focus();
+  }
+
+  function recordSpeechAnswer(status) {
+    if (!currentKnowledgeModel) return;
+    currentKnowledgeModel.audio.speech.status = status;
+    window.SharedKnowledge.save(currentKnowledgeModel);
+    renderMediaAnalysis();
+    mediaAnalysisSection.focus();
+  }
+
+  function resetMediaAnalysis() {
+    mediaAnalysisSection.hidden = true;
+    mediaAnalysisSummary.textContent = '';
+    mediaAnalysisQuestions.innerHTML = '';
   }
 
   function renderPlan(inspection) {
@@ -1018,8 +1273,11 @@
     knowledgeOutput.innerHTML = '';
   }
 
+  let currentAccessiblePlayer = null;
+
   async function renderViewer(source, inspection) {
     viewerSection.hidden = false;
+    if (currentAccessiblePlayer) { currentAccessiblePlayer.destroy(); currentAccessiblePlayer = null; }
     viewerOutput.innerHTML = '';
 
     if (inspection.sourceType === 'url') {
@@ -1032,24 +1290,22 @@
     const type = inspection.mediaType;
 
     if (type === 'video') {
-      const video = document.createElement('video');
-      video.controls = true;
-      video.preload = 'metadata';
-      video.src = objectUrl;
-      video.className = 'media-viewer';
-      video.setAttribute('aria-label', `Video preview for ${file.name}`);
-      viewerOutput.appendChild(video);
+      currentAccessiblePlayer = window.AccessiblePlayer.create(viewerOutput, {
+        mediaType: 'video',
+        src: objectUrl,
+        type: file.type,
+        title: `Video preview for ${file.name}`
+      });
       return;
     }
 
     if (type === 'audio') {
-      const audio = document.createElement('audio');
-      audio.controls = true;
-      audio.preload = 'metadata';
-      audio.src = objectUrl;
-      audio.className = 'media-viewer';
-      audio.setAttribute('aria-label', `Audio player for ${file.name}`);
-      viewerOutput.appendChild(audio);
+      currentAccessiblePlayer = window.AccessiblePlayer.create(viewerOutput, {
+        mediaType: 'audio',
+        src: objectUrl,
+        type: file.type,
+        title: `Audio player for ${file.name}`
+      });
       return;
     }
 
@@ -1112,25 +1368,21 @@
     }
 
     if (inspection.mediaType === 'video' && inspection.isDirectMedia) {
-      const video = document.createElement('video');
-      video.controls = true;
-      video.preload = 'metadata';
-      video.src = url;
-      video.className = 'media-viewer';
-      video.setAttribute('aria-label', `Video from ${inspection.sourceHost}`);
-      viewerOutput.appendChild(video);
+      currentAccessiblePlayer = window.AccessiblePlayer.create(viewerOutput, {
+        mediaType: 'video',
+        src: url,
+        title: `Video from ${inspection.sourceHost}`
+      });
       appendOpenLink(url, 'Open the original video');
       return;
     }
 
     if (inspection.mediaType === 'audio' && inspection.isDirectMedia) {
-      const audio = document.createElement('audio');
-      audio.controls = true;
-      audio.preload = 'metadata';
-      audio.src = url;
-      audio.className = 'media-viewer';
-      audio.setAttribute('aria-label', `Audio from ${inspection.sourceHost}`);
-      viewerOutput.appendChild(audio);
+      currentAccessiblePlayer = window.AccessiblePlayer.create(viewerOutput, {
+        mediaType: 'audio',
+        src: url,
+        title: `Audio from ${inspection.sourceHost}`
+      });
       appendOpenLink(url, 'Open the original audio');
       return;
     }
@@ -1176,6 +1428,7 @@
 
   function resetViewer() {
     viewerSection.hidden = true;
+    if (currentAccessiblePlayer) { currentAccessiblePlayer.destroy(); currentAccessiblePlayer = null; }
     viewerOutput.innerHTML = '';
   }
 
@@ -1207,7 +1460,20 @@
     const text = String(value || '').trim().toLowerCase();
     const intents = currentRecommendations ? currentRecommendations.recommendations : window.IntentEngine.getIntents(currentInspection);
     if (/make .*accessible|accessib.*video|prepare .*publication|complete accessibility/.test(text)) {
-      const plan = window.WorkflowChain.build(intents, currentInspection.mediaType);
+      // Stage 1 (docs/Stage 1 Engine-Orchestrated Analysis Directive.md) must resolve before a
+      // workflow is built — never construct a fixed transcript-caption-render chain just because
+      // the source is a video with an audio track.
+      updateEngineFileCompatibility();
+      if (currentKnowledgeModel && !window.StageOneAnalysis.isReady(currentKnowledgeModel)) {
+        return { stageOneBlocked: true };
+      }
+      const transcriptionNeeded = !currentKnowledgeModel || window.StageOneAnalysis.transcriptionNeeded(currentKnowledgeModel);
+      const captionsNeeded = !currentKnowledgeModel || window.StageOneAnalysis.captionsNeeded(currentKnowledgeModel);
+      const excluded = new Set();
+      if (!transcriptionNeeded) excluded.add('create-transcript');
+      if (!captionsNeeded) excluded.add('create-captions');
+      const chainIntents = excluded.size ? intents.filter((item) => !excluded.has(item.workflowId)) : intents;
+      const plan = window.WorkflowChain.build(chainIntents, currentInspection.mediaType);
       if (window.WorkflowChain.selectedSteps(plan).length) return { chain: plan };
     }
     const mediaType = currentInspection.mediaType;
@@ -1247,6 +1513,11 @@
       }
     }
     const match = matchDirectGoal(directGoalInput.value);
+    if (match && match.stageOneBlocked) {
+      directGoalStatus.textContent = 'Media analysis is not yet complete for this source. Resolve the question in Media Analysis, above, before Make This Accessible can build an accurate plan.';
+      mediaAnalysisSection.focus();
+      return;
+    }
     if (!match || (!match.intent && !match.chain)) {
       // Requests beyond what matchDirectGoal recognizes (translation, VPAT drafts, summaries, and
       // similar open-ended requests) are not yet interpreted by real language understanding — this
@@ -1255,8 +1526,13 @@
       directGoalStatus.textContent = 'That request is not recognized yet. Try one of the suggestions in the list, or a request like Transcribe this, Describe this picture, Create captions, Compress this, Detect text in this, or Make this accessible.';
       directGoalInput.focus(); return;
     }
-    if (match.chain) { directGoalStatus.textContent = 'Make This Accessible started.'; startWorkflowChain(match.chain); return; }
-    if (!match.intent.capability.canRun) { directGoalStatus.textContent = match.intent.capability.message || 'That task needs an assistance service configured in Advanced assistance settings.'; return; }
+    // startWorkflowChain makes its own single announcement in the Workflow Status region — an
+    // extra announcement here in a second live region would say the same thing twice.
+    if (match.chain) { startWorkflowChain(match.chain); return; }
+    if (!match.intent.capability.canRun || match.intent.available === false) {
+      directGoalStatus.textContent = match.intent.recommendationReason || match.intent.capability.message || 'That task needs an assistance service configured in Advanced assistance settings.';
+      return;
+    }
     directGoalStatus.textContent = `${match.intent.title} selected.`;
     runIntent(match.intent);
   }
@@ -1279,7 +1555,8 @@
     activeWorkflowChain.status = 'running';
     activeWorkflowChain.startedAt = new Date().toISOString();
     workflowChainSection.hidden = true;
-    setStatus('Make This Accessible started. The application will continue automatically and pause only when your review is required.');
+    announceWorkflowStatus('Make This Accessible started. The application will continue automatically and pause only when your review is required.');
+    progressSection.focus();
     continueWorkflowChain();
   }
 
@@ -1290,7 +1567,7 @@
       const wrapper = document.createElement('div');
       wrapper.className = 'workflow-chain-option';
       const id = `workflow-chain-step-${index + 1}`;
-      const stateLabel = step.completed ? 'Completed and skipped' : step.blocked ? 'Blocked' : step.requiresReview ? 'Ready, review checkpoint required' : 'Ready to execute';
+      const stateLabel = !step.selected ? 'Not needed for this source' : step.completed ? 'Completed and skipped' : step.blocked ? 'Blocked' : step.requiresReview ? 'Ready, review checkpoint required' : 'Ready to execute';
       wrapper.innerHTML = `
         <label for="${id}">
           <input id="${id}" type="checkbox" name="workflowChainStep" value="${escapeHtml(step.workflowId)}" ${step.selected ? 'checked' : ''} ${step.completed || step.blocked ? 'disabled' : ''}>
@@ -1323,7 +1600,8 @@
     activeWorkflowChain.status = 'running';
     activeWorkflowChain.startedAt = new Date().toISOString();
     workflowChainSection.hidden = true;
-    setStatus('The accessibility plan started. The first workflow is being prepared.');
+    announceWorkflowStatus('The accessibility plan started. The first workflow is being prepared.');
+    progressSection.focus();
     continueWorkflowChain();
   }
 
@@ -1336,24 +1614,27 @@
     const step = window.WorkflowChain.next(activeWorkflowChain);
     if (!step) {
       const summary = window.WorkflowChain.summary(activeWorkflowChain);
-      jobStatus.textContent = `Make This Accessible complete. ${summary.completed} workflow${summary.completed === 1 ? '' : 's'} completed.`;
-      setStatus('Make This Accessible is complete. The accessibility package and available publication outputs are ready.');
+      progressSection.hidden = true;
       activeWorkflowChain = null;
       renderGoalSuggestions(currentInspection.mediaType);
       renderCurrentTask();
+      // Focus is about to land on the Current Task summary, which is itself a live region — that
+      // single announcement is enough. Prepend the completion line to it rather than also
+      // announcing "complete" in the banner and the (now hidden) Workflow Status region first.
+      currentTaskSummary.textContent = `Make This Accessible is complete. ${summary.completed} workflow${summary.completed === 1 ? '' : 's'} completed. ${currentTaskSummary.textContent}`;
       currentTaskSection.focus();
       return;
     }
     if (step.blocked) {
-      jobStatus.textContent = `Make This Accessible paused before ${step.title}. ${activeWorkflowChain.pauseReason}`;
-      setStatus(`Make This Accessible paused. ${activeWorkflowChain.pauseReason}`);
+      progressSection.hidden = true;
       renderGoalSuggestions(currentInspection.mediaType);
       renderCurrentTask();
+      currentTaskSummary.textContent = `Make This Accessible paused before ${step.title}. ${activeWorkflowChain.pauseReason} ${currentTaskSummary.textContent}`;
       currentTaskSection.focus();
       return;
     }
     if (step.intent.workflowId === 'render-accessible-video') { offerRenderLaterPause(step.intent); return; }
-    setStatus(step.requiresReview
+    announceWorkflowStatus(step.requiresReview
       ? `${step.title} requires your review. Make This Accessible will resume automatically after approval.`
       : `${step.title} is running as the next Make This Accessible step.`);
     runIntent(step.intent);
@@ -1483,30 +1764,73 @@
     executionEngine.enqueue(activeJob);
   }
 
+  function updateTranscriptReviewedLabel() {
+    transcriptReviewedLabelText.textContent = transcriptNoSpeechInput.checked
+      ? 'I confirmed that this recording has little or no spoken dialogue.'
+      : 'I reviewed this transcript for accuracy and completeness.';
+  }
+
   function openTranscriptReview(intent) {
     pendingTranscriptIntent = intent;
     const review = window.TranscriptReview.build(currentFile ? currentFile.name : currentInspection.name);
+    const alreadyReportedNone = Boolean(currentKnowledgeModel && currentKnowledgeModel.audio && currentKnowledgeModel.audio.speech && currentKnowledgeModel.audio.speech.status === 'reported-none');
     transcriptTitleInput.value = review.suggestedTitle;
+    transcriptNoSpeechInput.checked = alreadyReportedNone;
     transcriptTextInput.value = '';
     transcriptReviewedInput.checked = false;
     transcriptReviewStatus.textContent = '';
-    transcriptReviewSummary.textContent = `Use the Viewer for ${currentFile ? currentFile.name : currentInspection.name}. Enter the spoken content, identify speakers when useful, and include meaningful sounds.`;
+    updateTranscriptReviewedLabel();
+    transcriptReviewSummary.textContent = `Use the Viewer for ${currentFile ? currentFile.name : currentInspection.name} to check whether it has spoken dialogue. If it does, enter and review the spoken content below. If it doesn't, check "little or no spoken dialogue in this recording" instead of leaving the text blank.`;
     transcriptReviewSection.hidden = false;
     transcriptReviewSection.focus();
     // If a compatible transcription provider is already available, request a draft right away
     // instead of waiting for a separate manual click, so goal-driven workflows like "Transcribe
     // this audio" and "Make this video accessible" actually reach automatic provider selection
     // and speech recognition. The person still reviews, edits, and approves before it is saved,
-    // and the existing Draft with AI button remains available to retry.
-    if (window.AIProviderLayer.getCapability('transcription-draft').canRun) requestTranscriptDraft();
+    // and the existing Draft with AI button remains available to retry. Never do this when the
+    // person (or Media Analysis) has already established there's little or no dialogue here —
+    // attempting speech transcription after that answer is exactly backwards. Also skip when the
+    // file is already known to exceed what the connected service accepts, rather than starting the
+    // attempt and failing mid-flow into a confirm dialog — the same fact should be known before
+    // the attempt starts, not discovered partway through it.
+    if (alreadyReportedNone) return;
+    const capability = window.AIProviderLayer.getCapability('transcription-draft');
+    if (!capability.canRun) return;
+    const effectiveSize = effectiveTranscriptionSourceSize();
+    if (capability.provider && capability.provider.external && Number.isFinite(effectiveSize) && effectiveSize > CONNECTED_SERVICE_MAX_BYTES) {
+      const usingExtractedAudio = Boolean(findExtractedAudioArtifact());
+      transcriptReviewStatus.textContent = `${usingExtractedAudio ? 'The extracted audio copy of this recording' : (currentFile ? currentFile.name : 'This file')} is larger than the 50 MB limit for ${capability.provider.name}. Enter the transcript manually, or configure a local service without that limit in Advanced assistance settings.`;
+      return;
+    }
+    requestTranscriptDraft();
   }
 
   function submitTranscriptReview(event) {
     event.preventDefault();
     if (!pendingTranscriptIntent) return;
     const text = window.TranscriptReview.normalizeText(transcriptTextInput.value);
+    if (!text && transcriptNoSpeechInput.checked) {
+      // Nothing was actually transcribed - record the Stage 1 fact and close out. This must not
+      // create a transcript artifact or mark create-transcript "completed"; no transcript exists.
+      if (currentKnowledgeModel) {
+        currentKnowledgeModel.audio.speech.status = 'reported-none';
+        window.SharedKnowledge.save(currentKnowledgeModel);
+      }
+      pendingTranscriptIntent = null;
+      resetTranscriptReview();
+      setStatus('Confirmed: little or no spoken dialogue. No transcript was created, since there was nothing to transcribe.');
+      renderMediaAnalysis();
+      renderCurrentTask();
+      if (activeWorkflowChain) {
+        window.WorkflowChain.markNotNeeded(activeWorkflowChain, 'create-transcript');
+        continueWorkflowChain();
+      } else {
+        currentTaskSection.focus();
+      }
+      return;
+    }
     if (!text) {
-      transcriptReviewStatus.textContent = 'Enter transcript text before saving.';
+      transcriptReviewStatus.textContent = 'Enter transcript text before saving, or check "little or no spoken dialogue in this recording" if there is nothing to transcribe.';
       transcriptTextInput.focus();
       return;
     }
@@ -1532,9 +1856,11 @@
     lastTranscriptProviderName = '';
     transcriptReviewSection.hidden = true;
     transcriptTitleInput.value = '';
+    transcriptNoSpeechInput.checked = false;
     transcriptTextInput.value = '';
     transcriptReviewedInput.checked = false;
     transcriptReviewStatus.textContent = '';
+    updateTranscriptReviewedLabel();
   }
 
 
@@ -1583,10 +1909,20 @@
     captionsReviewedInput.checked = false;
     captionReviewStatus.textContent = '';
     captionReviewSection.hidden = false;
-    if (window.AIProviderLayer.getCapability('caption-draft').canRun) {
+    const reportedNoSpeech = Boolean(currentKnowledgeModel && currentKnowledgeModel.audio && currentKnowledgeModel.audio.speech && currentKnowledgeModel.audio.speech.status === 'reported-none');
+    if (reportedNoSpeech) {
+      // A transcript confirmed to hold no spoken dialogue has nothing for an AI caption draft to
+      // work from — requesting one produces a meaningless blank cue. Ask directly instead of
+      // auto-running a draft that can't succeed.
+      captionCueEditor.open = true;
+      captionReviewSummary.textContent = 'The transcript for this recording was confirmed to have little or no spoken dialogue, so a caption draft was not requested automatically. If there are meaningful environmental sounds worth captioning, use Request timed caption draft or add cues manually below. Otherwise, captions may not be needed for this recording.';
+      captionReviewSummary.focus();
+    } else if (window.AIProviderLayer.getCapability('caption-draft').canRun) {
       captionReviewSummary.textContent = 'Creating a caption draft using the best available method.';
       captionReviewSummary.focus();
-      requestCaptionDraft();
+      // Deferred one tick so the draft's own DOM insertion and live-region updates don't start
+      // while this focus-move announcement is still being spoken.
+      window.setTimeout(requestCaptionDraft, 0);
     } else if (review.reusedTranscript) {
       review.cues.forEach((cue) => addCaptionCue(cue));
       captionCueEditor.open = true;
@@ -1997,25 +2333,42 @@
   // historical-learning model described in the product direction — that needs its own scoped
   // implementation with somewhere to store real per-provider timing data. This gives an honest,
   // continuously-updating "about this long" figure in the meantime, rather than percentage only.
-  function estimateRemainingText(job) {
+  // Returns both the sentence to display and a short, stable category name. The category only
+  // changes when the estimate genuinely moves into a different bucket (not on every recalculation),
+  // so callers can tell a real change from routine noise.
+  function estimateRemaining(job) {
     const elapsedMs = Date.now() - (job.startedAt ? new Date(job.startedAt).getTime() : Date.now());
     const progress = Number(job.progress) || 0;
-    if (progress < 5 || elapsedMs < 4000) return 'Estimating remaining time.';
+    if (progress < 5 || elapsedMs < 4000) return { text: 'Estimating remaining time.', category: 'estimating' };
     const totalEstimateMs = (elapsedMs / progress) * 100;
     const remainingMs = Math.max(0, totalEstimateMs - elapsedMs);
     const low = remainingMs * 0.75;
     const high = remainingMs * 1.25;
-    if (high < 20000) return 'Estimated remaining time: less than a minute.';
-    return `Estimated remaining time: approximately ${formatDuration(low)} to ${formatDuration(high)}.`;
+    if (high < 20000) return { text: 'Estimated remaining time: less than a minute.', category: 'less-than-a-minute' };
+    // Bucket to the minute so the category (and therefore whether we re-announce) is stable even
+    // though the exact low/high figures keep drifting slightly from one recalculation to the next.
+    const lowMinutes = Math.round(low / 60000);
+    const highMinutes = Math.round(high / 60000);
+    return {
+      text: `Estimated remaining time: approximately ${formatDuration(low)} to ${formatDuration(high)}.`,
+      category: `${lowMinutes}-${highMinutes}`
+    };
   }
 
+  // Updates the visible elapsed/remaining/percent text every time it's called (this is not a live
+  // region, so that's safe to do often). Returns true only when the remaining-time category
+  // actually changed, so the caller can decide whether this update is worth a live announcement.
   function updateTimeStatus(job) {
     if (!job.startedAt) {
       jobTimeStatus.textContent = `Still waiting in the queue. Overall progress: ${Math.round(Number(job.progress) || 0)} percent.`;
-      return;
+      return false;
     }
     const elapsedMs = Date.now() - new Date(job.startedAt).getTime();
-    jobTimeStatus.textContent = `Elapsed: ${formatDuration(elapsedMs)}. ${estimateRemainingText(job)} Overall progress: ${Math.round(Number(job.progress) || 0)} percent.`;
+    const remaining = estimateRemaining(job);
+    jobTimeStatus.textContent = `Elapsed: ${formatDuration(elapsedMs)}. ${remaining.text} Overall progress: ${Math.round(Number(job.progress) || 0)} percent.`;
+    const changed = remaining.category !== lastAnnouncedRemainingCategory;
+    lastAnnouncedRemainingCategory = remaining.category;
+    return changed;
   }
 
   function stopProgressTimer() {
@@ -2034,15 +2387,35 @@
       </li>
     `).join('');
     stopProgressTimer();
+    lastAnnouncedStepIndex = null;
+    lastAnnouncedPercentBucket = -1;
+    lastAnnouncedRemainingCategory = '';
     updateTimeStatus(job);
-    // Every 20 seconds rather than every second: continuous updates without announcing every
-    // small change, per the requirement to avoid excessive percentage/time announcements.
-    progressTimer = window.setInterval(() => updateTimeStatus(job), 20000);
+    // The visible elapsed/remaining/percent text refreshes every 20 seconds. This never announces
+    // by itself — updateTimeStatus reports back only whether the remaining-time category changed,
+    // and only then does this become a live announcement, appended to whatever is currently shown
+    // rather than replacing it.
+    progressTimer = window.setInterval(() => {
+      if (updateTimeStatus(job) && !jobStatus.textContent.includes('Estimated remaining time')) {
+        jobStatus.textContent = `${jobStatus.textContent} ${estimateRemaining(job).text}`;
+      }
+    }, 20000);
   }
 
   function updateProgress(job, detail) {
     if (window.ProductionFeatures) window.ProductionFeatures.saveJob(job);
-    jobStatus.textContent = detail.message;
+    // The one live announcement (job-status) only updates at a meaningful transition: a new step
+    // starting, or the overall percentage crossing one of the standard intervals. Frequent
+    // in-between progress reports (e.g. a render reporting its position every fraction of a
+    // second) still update the visible percentage and elapsed/remaining text below, just silently.
+    const percent = Math.round(Number(job.progress) || 0);
+    const crossedBucket = PERCENT_INTERVALS.find((mark) => percent >= mark && lastAnnouncedPercentBucket < mark);
+    const isNewStep = detail.stepIndex !== lastAnnouncedStepIndex;
+    if (isNewStep || crossedBucket) {
+      jobStatus.textContent = detail.message;
+      lastAnnouncedStepIndex = detail.stepIndex;
+      if (crossedBucket) lastAnnouncedPercentBucket = crossedBucket;
+    }
     updateTimeStatus(job);
     updateActiveJobStatus(job, job.status);
     progressBar.style.width = `${job.progress}%`;
@@ -2080,6 +2453,7 @@
     currentAssessment = window.AccessibilityAssessment.assess(currentKnowledgeModel);
     currentPlan = window.AccessibilityPlan.build(currentKnowledgeModel, currentAssessment, window.IntentEngine.getIntents(currentInspection));
     renderAssessment(currentInspection);
+    renderMediaAnalysis();
     renderPlan(currentInspection);
     renderRecommendations(currentInspection);
     renderKnowledge();
@@ -2121,8 +2495,7 @@
       cancelJobButton.disabled = true;
       progressSection.hidden = true;
       stopProgressTimer();
-      jobStatus.textContent = error.needsUserActivation ? 'Final browser rendering requires one activation.' : `Rendering did not finish. ${error.message}`;
-      setStatus(jobStatus.textContent);
+      setStatus(error.needsUserActivation ? 'Final browser rendering requires one activation.' : `Rendering did not finish. ${error.message}`);
       renderCurrentTask();
       currentTaskSummary.textContent = error.needsUserActivation
         ? 'Everything is ready. Press Start final rendering to complete the video.'
@@ -2444,6 +2817,13 @@
     aiProviderStatus.textContent = 'Connected service configuration cleared. Automatic selection is active.'; renderAIProviders();
   });
   draftTranscriptButton.addEventListener('click', requestTranscriptDraft);
+  transcriptNoSpeechInput.addEventListener('change', () => {
+    updateTranscriptReviewedLabel();
+    if (currentKnowledgeModel) {
+      currentKnowledgeModel.audio.speech.status = transcriptNoSpeechInput.checked ? 'reported-none' : 'not-analyzed';
+      window.SharedKnowledge.save(currentKnowledgeModel);
+    }
+  });
   draftImageDescriptionButton.addEventListener('click', requestImageDescriptionDraft);
   draftCaptionsButton.addEventListener('click', requestCaptionDraft);
   draftAudioDescriptionButton.addEventListener('click', requestAudioDescriptionDraft);

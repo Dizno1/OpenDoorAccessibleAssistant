@@ -49,6 +49,12 @@
       <div id="viewer-output"></div>
     </section>
 
+    <section id="media-analysis-section" class="panel" aria-labelledby="media-analysis-heading" tabindex="-1" hidden>
+      <h2 id="media-analysis-heading">Media Analysis</h2>
+      <div id="media-analysis-summary" role="status" aria-live="polite" aria-atomic="true"></div>
+      <div id="media-analysis-questions"></div>
+    </section>
+
     <section id="current-task-section" class="panel" aria-labelledby="current-task-heading" tabindex="-1" hidden>
       <h2 id="current-task-heading">Current task</h2>
       <div id="current-task-summary" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -77,9 +83,13 @@
     </section>
 
     <section id="progress-section" class="panel" aria-labelledby="progress-heading" tabindex="-1" hidden>
-      <h2 id="progress-heading">Working</h2>
+      <h2 id="progress-heading">Workflow Status</h2>
       <div id="job-status" role="status" aria-live="polite" aria-atomic="true">Nothing is running.</div>
-      <div id="job-time-status" role="status" aria-live="polite" aria-atomic="true"></div>
+      <!-- Not a live region on purpose. Elapsed time and the remaining-time estimate update here
+           continuously for sighted/visual reference, but only job-status (above) is announced, and
+           only at meaningful transitions. Two simultaneous live regions updating together on every
+           progress tick is what caused the noisy, repeated announcements. -->
+      <div id="job-time-status"></div>
       <div class="progress-meter" role="progressbar" aria-label="Workflow progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
         <div id="progress-bar" class="progress-bar"></div>
       </div>
@@ -96,15 +106,19 @@
           <input id="transcript-title" name="transcriptTitle" type="text" aria-describedby="transcript-title-help" required>
           <p id="transcript-title-help" class="help-text">This title appears at the top of the saved transcript.</p>
         </div>
+        <label class="confirmation-option">
+          <input id="transcript-no-speech" type="checkbox">
+          There is little or no spoken dialogue in this recording.
+        </label>
         <div class="form-field">
           <label for="transcript-text">Transcript text</label>
-          <textarea id="transcript-text" name="transcriptText" rows="18" aria-describedby="transcript-text-help transcript-review-status" required></textarea>
-          <p id="transcript-text-help" class="help-text">Include speaker names when useful and meaningful sounds in brackets, such as [music] or [door closes].</p>
+          <textarea id="transcript-text" name="transcriptText" rows="18" aria-describedby="transcript-text-help transcript-review-status"></textarea>
+          <p id="transcript-text-help" class="help-text">Include speaker names when useful and meaningful sounds in brackets, such as [music] or [door closes]. If you checked "little or no spoken dialogue" above, you can leave this blank, or note meaningful environmental sounds here.</p>
           <button type="button" id="draft-transcript">Request transcript draft</button>
         </div>
         <label class="confirmation-option">
           <input id="transcript-reviewed" type="checkbox">
-          I reviewed this transcript for accuracy and completeness.
+          <span id="transcript-reviewed-label-text">I reviewed this transcript for accuracy and completeness.</span>
         </label>
         <div id="transcript-review-status" role="status" aria-live="polite" aria-atomic="true"></div>
         <div class="next-actions">
@@ -634,6 +648,10 @@
   <script src="js/workflow-chain.js"></script>
   <script src="js/workflow-runner.js"></script>
   <script src="js/execution-engine.js"></script>
+  <script src="js/stage-one-analysis.js"></script>
+  <script src="js/audio-signal-analysis.js"></script>
+  <script src="js/accessible-player.js"></script>
+  <script src="js/desktop-shortcuts.js"></script>
   <script src="js/app.js"></script>
   <script src="js/publication-pipeline.js"></script>
 

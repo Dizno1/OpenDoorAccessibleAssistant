@@ -1,0 +1,23 @@
+Open Door Accessible Assistant - Windows Foundation Increment 1
+
+DONE
+- Preserved the assistant source files and existing browser functionality.
+- Added a minimal Tauri 2 Windows desktop shell configuration and NSIS installer target.
+- Added Ctrl+O to activate the existing file picker, without changing its established file processing path.
+- Reviewed DesignPhilosophyAndStandards as a read-only reference. No files in DesignRepo were changed.
+- Added an engineering checklist for screen-reader-first migration.
+
+NOT DONE
+- This is source code, not a compiled Windows installer. Build has not been run or verified.
+- FFmpeg, Python processing, Whisper, provider preflight, secure credential storage, native menus, and large-file IPC are NOT bundled or implemented yet.
+- Existing web application may rely on browser features that require adaptation in Tauri WebView2.
+- No JAWS or NVDA hands-on testing has occurred.
+
+NEXT
+1. Build on Windows using npm install and npm run desktop:dev; inspect errors.
+2. Test existing file selection and the Ctrl+O shortcut with JAWS and NVDA.
+3. Implement native local file processing and capability readiness checks.
+4. Add native menus and screen-reader-tested focus/status patterns.
+
+ROLLBACK
+Remove package.json, src-tauri, js/desktop-shortcuts.js and its script reference in index.html to return to the original web-only source.

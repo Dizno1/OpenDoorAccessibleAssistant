@@ -51,7 +51,7 @@
 
   function createStep(intent, index) {
     const completed = Boolean(intent.completed);
-    const canRun = Boolean(intent.capability && intent.capability.canRun);
+    const canRun = Boolean(intent.capability && intent.capability.canRun) && intent.available !== false;
     return {
       id: `orchestration-step-${index + 1}`,
       workflowId: intent.workflowId,
@@ -76,7 +76,8 @@
       step.title = current.title;
       step.description = current.description;
       step.completed = Boolean(current.completed);
-      step.blocked = !step.completed && !Boolean(current.capability && current.capability.canRun);
+      const canRun = Boolean(current.capability && current.capability.canRun) && current.available !== false;
+      step.blocked = !step.completed && !canRun;
       step.state = step.completed ? 'completed' : step.blocked ? 'blocked' : 'ready';
     });
     return chain;
@@ -126,6 +127,20 @@
     chain.status = 'running';
   }
 
+  // Distinct from markCompleted: Stage 1 determining a step isn't required (e.g. no dialogue, so
+  // no transcript) is not the same fact as the work having been done. Deselecting it removes it
+  // from iteration (next() skips unselected steps) without claiming completion that didn't happen.
+  function markNotNeeded(chain, workflowId) {
+    const step = chain.steps.find((item) => item.workflowId === workflowId);
+    if (step) {
+      step.selected = false;
+      step.completed = false;
+      step.blocked = false;
+      step.state = 'not-needed';
+    }
+    chain.status = 'running';
+  }
+
   function markFailed(chain, workflowId, message) {
     const step = chain.steps.find((item) => item.workflowId === workflowId);
     if (step) {
@@ -155,6 +170,7 @@
     next,
     markRunning,
     markCompleted,
+    markNotNeeded,
     markFailed,
     summary
   };

@@ -1,0 +1,10 @@
+{
+  "identifier": "default",
+  "description": "Minimum desktop shell permissions",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}

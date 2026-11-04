@@ -46,7 +46,8 @@
         speakers: { status: inspection.hasAudio ? 'not-analyzed' : 'not-applicable', count: null },
         language: { status: inspection.hasAudio ? 'not-analyzed' : 'not-applicable', value: null },
         music: { status: inspection.hasAudio ? 'not-analyzed' : 'not-applicable' },
-        silence: { status: inspection.hasAudio ? 'not-analyzed' : 'not-applicable' }
+        silence: { status: inspection.hasAudio ? 'not-analyzed' : 'not-applicable' },
+        nonSpeechSignificant: { status: inspection.hasAudio ? 'not-analyzed' : 'not-applicable' }
       },
       visual: {
         present: Boolean(inspection.hasVideo || inspection.hasImages),

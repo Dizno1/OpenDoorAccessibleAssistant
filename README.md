@@ -93,6 +93,25 @@ Extract Audio requires a supported local video containing an audio track and a b
 
 `media-inspector.js` creates the source inspection used throughout the application. `shared-knowledge.js` merges that inspection with saved source knowledge.
 
+### Authoritative Stage 1 Architecture: File, Analysis, Engines, Workflow
+
+This sequence is the controlling architecture for every supported source type. It is not optional, and later workflow logic must not bypass it.
+
+1. **Receive the file or web source.** Identify the source type, container, format, basic technical properties, and whether the browser can inspect or preview it.
+2. **Begin Stage 1 analysis.** Determine what is actually present in the source and what still must be analyzed. For media, this can include speech, speakers, meaningful non-speech audio, scenes, actions, objects, on-screen text, existing captions, existing audio description, and other accessibility-relevant content. For documents, websites, and images, Stage 1 must use the equivalent source-specific analysis.
+3. **Determine the required capabilities and engines.** Stage 1 maps the source type and unresolved analysis questions to the engines needed to answer them. Examples include FFmpeg or browser media inspection, speech recognition, speaker identification, audio-event analysis, visual analysis, OCR, document parsing, accessibility-tree inspection, caption analysis, and audio-description analysis.
+4. **Check engine availability.** The application must determine whether each required capability is available through a working local engine, browser capability, Shared Service, or configured provider. A capability is not considered available merely because scaffolding or a provider adapter exists.
+5. **Install, configure, activate, or test missing engines.** When a required capability is unavailable, the normal workflow pauses and routes the user to an accessible Engine or Provider setup path. The application must explain what is missing, why it is needed, whether processing is local or external, and any privacy or cost implications.
+6. **Resume and complete Stage 1 analysis.** After the required engine becomes available, analysis resumes automatically or through one clearly labeled continuation action. Unknown analysis fields must remain unknown until produced by real inspection or a functioning engine.
+7. **Build the accessibility workflow from completed analysis.** Only after Stage 1 has enough reliable results may the application decide which accessibility tasks are required, optional, unnecessary, or blocked.
+8. **Execute the workflow and preserve human review.** Automatic work may proceed, but transcript, caption, audio-description, remediation, and publication decisions still require the appropriate human checkpoints.
+
+The application must never replace missing analysis with a fixed transcript-caption-render pipeline. It must never treat an unset analysis field as evidence that analysis was completed. It must never ask the user to invent content simply because the engine that should have produced or evaluated that content is unavailable.
+
+For example, a video upload does not automatically prove that a transcript is required. Stage 1 must first determine whether speech analysis was actually completed. If the speech-analysis capability is unavailable, the application must say so and direct the user to engine setup rather than opening transcript review as though spoken content had already been detected.
+
+Implementation status: this architecture is the established project direction, but the current repository does not yet enforce it end to end. Existing inspection, assessment, provider, and workflow components contain portions of the design. The immediate development priority is to connect them into this authoritative sequence and remove paths that construct workflows from file type, defaults, placeholders, or unset analysis values.
+
 ### Assessment, planning, and recommendations
 
 The accessibility assessment identifies relevant improvements. The accessibility plan orders dependent work. The Recommendation Engine combines those results with provider availability, completed history, and active jobs.
@@ -2033,9 +2052,22 @@ Inspect completed media playback, caption timing, track availability, audio-desc
 
 ## Next Development Phase
 
-Phase 33 - Automated Playback Quality Assurance.
+Stage 1 Engine-Orchestrated Analysis Correction. This work takes priority over Automated Playback Quality Assurance because later workflow and publication testing cannot be trusted while Stage 1 can still construct an accessibility plan from incomplete or placeholder analysis.
 
 ## Next Development Priorities
+
+**Immediate: Enforce the Authoritative Stage 1 Architecture**
+
+- Audit every Stage 1 field and identify whether it comes from real inspection, a functioning engine, a hard-coded default, a placeholder, or an unset value.
+- Map every supported source type to the analysis capabilities and engines it may require.
+- Add a single engine-availability resolver used by inspection, assessment, planning, recommendations, and workflow chaining.
+- Prevent workflow construction when required analysis is incomplete.
+- Route missing capabilities to accessible engine or provider setup, including local installation guidance where applicable.
+- Resume Stage 1 after setup and build the workflow only from completed analysis.
+- Remove the assumption that every video requires transcript creation.
+- Verify the complete sequence with JAWS using silent, speech-heavy, music-only, and mixed-content videos before marking the correction complete.
+
+After this correction, continue with Automated Playback Quality Assurance and the source-type roadmap below.
 
 The current assignment's priority is completing the real, end-to-end "Make
 this video accessible" workflow — provider health and fallback, transcript
@@ -2186,3 +2218,180 @@ Design Principles
 - The assistant is responsible for interpreting the request, selecting workflows, choosing healthy providers, and coordinating execution.
 - Users should never need to understand workflow names, AI providers, or internal architecture.
 - Suggestions should adapt to the supplied content and eventually learn from previous usage.
+
+### Phase 34 - Accessible Publication Player - Completed
+
+Rendered publication ZIP packages now use a reusable accessible media player based on the eComBack player design instead of a bare native video element. Each package includes the original video and the rendered audio-described version, allowing the Audio Description control to switch between them while preserving playback position, paused state, and captions. The player also provides labeled play or pause, ten-second movement, seek, mute, volume, captions, transcript, keyboard shortcuts, visible focus, and one consolidated polite status region.
+
+When a completed transcript artifact is available, it is included in the player and exported as a separate text file. The publication manifest is now version 2, and the validation checklist includes both video versions, keyboard and screen reader operation, captions, transcript, and narration synchronization.
+
+Implementation:
+
+- `js/publication-renderer.js` builds the dual-video accessible player and expanded publication package.
+- `docs/Phase 34 Accessible Publication Player.md` documents behavior, accessibility, package contents, and limitations.
+
+### Phase 36 - Screen Reader First Workflow Correction - In Progress
+
+Started against the "OpenDoorAccessibleAssistant Screen Reader First Workflow" directive, which asked for a full audit of the Make This Accessible workflow, progress announcements, next-action guidance, focus management, and the accessible media player.
+
+Current-state workflow map, traced from the repository as it stood at the start of this phase:
+
+- Source selection (`js/app.js` file/URL handling) hands off to inspection, then to `renderGoalSuggestions` and the direct-goal combo box. Automatic vs. review-required is decided by `js/intent-engine.js` and `js/workflow-chain.js`.
+- `Make This Accessible` (`startWorkflowChain` / `continueWorkflowChain` in `js/app.js`, backed by `js/workflow-chain.js`) automatically runs steps that don't need a person, and stops at steps `requiresReview` marks, or at capability-blocked steps.
+- Individual review workspaces (`js/transcript-review.js`, `js/caption-review.js`, `js/audio-description-review.js`, and their `js/app.js` wiring) already move focus into the relevant labelled section on open, and back to the Workflow Status heading / Current Task summary after approval.
+- Progress and time reporting flow through `js/workflow-runner.js` → `updateProgress` in `js/app.js`. The accessible publication player (`js/publication-renderer.js`, Phase 34) is the approved eComBack-based design and is only used in exported publication packages, not yet inside the in-app review/preview experience.
+- `pickNextAction` / `renderCurrentTask` in `js/app.js` already treat an active paused/review chain as taking priority over any other suggestion, so a later step is not offered as "next" while an earlier one is blocking.
+
+Fixed in this pass:
+
+- **Noisy, repeated announcements.** `js/publication-renderer.js`'s render-progress monitor reports position roughly every 750ms, and this was going straight into a live region on every tick — the direct cause of things like "less than a minute" being re-announced for minutes at a time. `updateProgress` in `js/app.js` now only writes to the one live Workflow Status region (`job-status`) when the step changes or the overall percentage crosses a 10/25/50/75/90/100 boundary; in-between ticks still update the visible percentage and elapsed/remaining text silently.
+- **Two live regions announcing the same event.** Several Make This Accessible transitions (chain start, paused-for-review, complete) were writing near-identical text into both the top status banner and the Workflow Status region, or into a hidden region and the banner, at the same moment. These now go through a single `announceWorkflowStatus` helper, and chain completion/pause now speaks once, through the Current Task summary that already receives focus at that point.
+- **`job-time-status` was a second live region.** It updated in lockstep with `job-status` on every tick. It's no longer a live region — it's a plain, continuously-updated visual field for elapsed time, remaining-time estimate, and percentage; only `job-status` (job-status heading: "Workflow Status") is announced, and only at the meaningful transitions above.
+- **Generic "Working" heading.** Renamed to "Workflow Status" to match the directive's named region and to give the heading itself meaning when a screen reader user tabs to it.
+- **Focus on workflow start.** `startWorkflowChain` / `submitWorkflowChain` now move focus to the Workflow Status heading immediately after announcing that Make This Accessible has started, instead of leaving focus wherever it was on the combo box.
+- **Player was a bare native element, not the approved design.** The initial file/URL preview (`renderViewer` in `js/app.js`) used a plain `<video controls>` / `<audio controls>` element with default browser controls, and stayed visible unchanged through every transcript/caption/audio-description review step — the only place that used the approved eComBack pattern was the exported publication package. Added `js/accessible-player.js`, a reusable in-app player built to the same control set, labels, `aria-pressed` pattern, keyboard shortcuts (Space/C/D/T), and single consolidated live region as `js/publication-renderer.js`'s player. All four preview paths (local video, local audio, direct-URL video, direct-URL audio) now use it, including Back 10 Seconds / Forward 10 Seconds, which the native controls didn't expose at all. Since the viewer stays visible through review, this is also what a person uses to play the source while reviewing the transcript, captions, or audio-description script.
+
+Not yet done (deferred to a following session, in the order the directive specifies):
+
+- The in-app player currently runs in Standard-video/audio-only mode (matching what actually exists at preview time). It does not yet pick up captions or the transcript once they're approved and re-render itself with the Captions/Transcript controls, the way the exported publication player does — that needs the exact artifact-lookup API (`OutputManager.listForSource` content shape) confirmed against real saved output before wiring it, rather than guessed at.
+- A full focus-management audit across every remaining transition (errors, cancellation, individual workflow completion outside the chain) beyond the chain-level ones above.
+- A full label/instruction audit against Phase Seven's specific list.
+- Real JAWS/NVDA/keyboard-only testing per Phase Eight — the changes above are based on tracing the code, not a live screen reader session, since that verification needs to happen on your machine.
+
+See `docs/ScreenReaderFirstWorkflow.md` for the announcement and focus behavior this phase established, written from the user's perspective.
+
+### Phase 37 - Render Readiness Root Cause - Completed
+
+Your JAWS test surfaced three messages that contradicted each other: "Create a transcript requires your review," "Next recommended action: Render accessible video," and then, after activating rendering, "Create and review captions before rendering the accessible video." Traced to one root cause, not three separate bugs:
+
+`render-accessible-video` had no entry in `js/accessibility-plan.js`'s task list, so `dependencyStatus()` in `js/recommendation-engine.js` always returned `'clear'` for it — there was nothing to check against. That made it look "available" the moment a provider existed, regardless of whether captions or described audio actually existed yet. `js/workflow-runner.js`'s `validateJob` already had the real, correct check (captions text present, described-audio mix present) — but only at the moment rendering actually started, after the Current Task section had already offered it as "next" and shown a working-looking button.
+
+Fixed:
+
+- Added `renderPrerequisitesMet(model)` to `js/recommendation-engine.js`, using the exact same check `validateJob` uses (captions `text/vtt` artifact with content, `audio/wav` described-audio artifact with a URL), and gated `render-accessible-video`'s `available` flag on it. This is the one place "is render actually ready" is now decided; the recommendation list, Current Task, and Make This Accessible chain all read from it instead of each recomputing their own (inconsistent) answer.
+- `js/app.js`'s `pickNextAction` and `js/workflow-chain.js`'s `createStep`/`refresh` now also check `available`, not just raw provider capability, so render-accessible-video can't be offered as "next," built into a chain as unblocked, or auto-run before its prerequisites exist.
+- Typing a direct request that maps to render-accessible-video before it's ready now shows the real reason ("Render Accessible Video is unavailable until the transcript and captions are approved.") instead of running the job and surfacing the internal validation error.
+
+Checked and not a bug: the JAWS transcript listed "Workflow Status" and "Current task" headings more than once. The DOM has exactly one of each (`#progress-heading`, `#current-task-heading`) — that repetition in the transcript reflects JAWS re-visiting the same heading during navigation, not duplicate elements.
+
+Not independently verified: the review section (Review Transcript) not "providing a clear action," per your test, appears to be a consequence of the routing bug above — you were directed to Render instead of into transcript review, so the review controls were never actually reached. `js/app.js`'s `openTranscriptReview` already sets an orientation sentence and moves focus to the section on open; this needs a real test now that the routing is fixed, rather than a second guess at what's wrong.
+
+Still outstanding, lower priority: the "Strongly recommended" vs. "required" labeling Chip flagged under Accessibility Assessment (in More Details, not required for the current task), and the caption/transcript-aware in-app player upgrade from Phase 36.
+
+### Phase 38 - Fixed-Pipeline Critique and Transcript-for-Silent-Media - Partial
+
+Your "Walk about the house and front yard.MOV" test raised a real architectural point, and one concrete, fixable bug.
+
+**The architectural point is correct and not yet addressed.** `js/workflow-chain.js`'s `workflowOrderByMediaType.video` is a fixed sequence — every video gets extract-audio → transcript → captions → audio-description → render, regardless of content. `js/media-inspector.js`'s `hasAudio` field is literally `mediaType === 'audio' || mediaType === 'video'` — it doesn't inspect the audio track at all, let alone detect speech. `model.audio.speech.status`, referenced in `js/accessibility-plan.js`, is never actually set anywhere in the codebase. The "intelligence" your test exposed is aspirational scaffolding, not a working analysis step — you're right that it's currently a checklist, not an assistant.
+
+**What I didn't do, and why:** build real speech/scene/object detection now. Two honest options exist, and I didn't want to fake a third:
+
+1. A connected AI provider (the OpenAI adapter and similar infrastructure already exist in the app for transcription/visual-analysis drafts) could genuinely answer "does this have speech," "what's in frame," etc. — but that's an opt-in, possibly-billed, privacy-confirmed path the person has to configure, not something to silently run by default.
+2. A local heuristic (e.g., WebAudio energy analysis to guess "silent vs. not") can reliably detect a *genuinely silent* audio track, but cannot reliably distinguish quiet dialogue from wind and footsteps. Shipping that as if it were real speech detection would mean the app could silently decide a video with real, quiet dialogue doesn't need a transcript — for an accessibility tool, a wrong "skip this" is worse than an unnecessary "review this." I didn't build this without being able to verify it against real recordings.
+
+Building this correctly is a real project, not a quick fix: it needs a decision, with you, about whether it leans on connected AI (option 1) and how much a browser-only heuristic (option 2) is trusted to gate anything automatically versus only ever suggesting.
+
+**What I did fix**, since it was the one piece of this test with a concrete, verifiable defect: the transcript review screen assumed dialogue exists. The text field was HTML-`required`, so if there genuinely isn't any spoken content, there was no way to approve and move on — you'd be stuck. Added a checkbox, "There is little or no spoken dialogue in this recording," to `js/app.js`'s transcript review; checking it lets you save without typing anything, filling in an honest, accurate statement rather than inventing dialogue. The instructions above the field now say to check that box instead of leaving it blank, rather than assuming spoken content is there to describe.
+
+**The "0:00 / 0:00" duration bug**, also fixed defensively even though I can't confirm the exact cause without a browser to test in: `js/accessible-player.js` now also listens for `loadedmetadata` and `canplay` (previously only `durationchange`, which some local blob URLs — `.mov` files in particular — don't reliably fire), applies the standard workaround for Chrome occasionally reporting `Infinity` for a local blob's duration until a seek forces it to resolve, and — if the file genuinely can't be decoded — announces that plainly instead of silently displaying "0:00" forever with no explanation. If this was actually a `.mov` decoding limitation in Chrome itself rather than a timing bug in the player, this won't fix playback, but it will now tell you that instead of showing a duration that looks valid but isn't.
+
+### Phase 39 - Stage 1 Media Analysis Coordinator - Partial, First Implementation
+
+Implements the beginning of `docs/Stage 1 Engine-Orchestrated Analysis Directive.md`. Not marked complete — acceptance tests in that document have not been run against real engines and real files, and only the speech question is covered; visual/scene analysis is not.
+
+- `js/stage-one-analysis.js`: the authoritative Stage 1 coordinator. Resolves whether speech-presence is known for a source — by a real, currently-healthy connected transcription engine (`AIProviderLayer.getCapability('transcription-draft')`, which genuinely requires a configured external or local service; there is no default/always-on speech engine in this app) or by a direct, recorded human answer. Never inferred from media type or audio-track presence alone.
+- New **Media Analysis** section (`index.html`, positioned right after the Viewer) shows what's known and, when the speech question is unresolved, gives the two real paths the directive specifies: configure an engine, or answer directly.
+- **Make This Accessible now refuses to build a chain** until Stage 1 resolves the speech question — `js/app.js`'s `matchDirectGoal` returns `{ stageOneBlocked: true }` and routes focus to Media Analysis instead. When the person has recorded "little or no spoken dialogue," `create-transcript` and `create-captions` are excluded from the chain entirely, rather than being run and then producing a placeholder transcript.
+
+**Note on how this was tested**: the previous JAWS test that reported "still fundamentally wrong" was run against a build that did not yet contain this work — it was written but not shipped in that session. The corrections below were found by tracing that older build's code, not by re-deriving Stage 1's design.
+
+### Phase 40 - Corrections From an Un-Shipped-Build JAWS Test
+
+- **`create-captions` had the same missing-dependency gap `render-accessible-video` had in Phase 37**, from the other direction: it has a real plan dependency on `create-transcript`, but the `available` flag never consulted it — only raw provider capability. Since captions score higher than transcript in `accessibilityPriority`, this let "Next recommended action: Create captions" appear before a transcript existed. Fixed in `js/recommendation-engine.js`, gated the same way render was: `available` now also requires the transcript to actually have usable content (or a recorded "no dialogue" answer). `audio-description` was deliberately left alone — its plan dependency runs through visual analysis, which has no real engine in this build and never reaches `'complete'`; gating on that would make a working, manually-authored workflow permanently unavailable instead of fixing anything.
+- **Opening transcript review auto-requested an AI transcription draft unconditionally**, even when the person had just told the app there's no dialogue. `js/app.js`'s `openTranscriptReview` now checks the recorded Stage 1 answer first and skips the request entirely when it's "reported-none."
+- **The same auto-request could fail into a confirm dialog well after the workflow had already started**, when the file exceeded a connected provider's size limit. That limit is now checked before the automatic attempt starts, showing a plain message instead of letting the attempt begin and fail mid-flow.
+- **Opening caption review auto-requested an AI caption draft from a transcript that was just the "no spoken dialogue" placeholder**, producing a meaningless blank cue. Skipped in that case, with an explanation and the existing manual/request-anyway options still available for meaningful environmental sounds.
+- **The transcript-review confirmation checkbox always said "I reviewed this transcript,"** even when the no-speech box was checked and there was nothing to review. It now reads "I confirmed that this recording has little or no spoken dialogue" in that case, updated live as the no-speech checkbox is toggled.
+- **Two live regions announcing the same "draft ready" event together, right before a focus move onto newly-inserted form fields** (in caption-draft success) — reduced to one live announcement, and the caption-draft auto-request is now deferred one tick after the initial focus-move announcement so the two don't overlap.
+
+**Not confirmed fixed**: the report of every caption-review control's accessible name collapsing to the status text ("Creating a caption draft using the best available method."). Each cue's markup builds correct, unique labels — I could not find a static labeling bug. My best explanation is a JAWS announcement collision from inserting ~12 cue fields via `innerHTML` in the same synchronous block as two live-region writes and a focus move, which the changes above should reduce, but I can't confirm this is fully resolved without a real screen reader testing it. If it recurs, the next thing to check is whether it happens specifically right after that burst of DOM insertion.
+
+**Not addressed**: a general pre-flight capability/limit check for every provider and every workflow (only the transcription-draft size case above was fixed); a single authoritative workflow-state resolver replacing the several places that currently compute "current step / next action" independently (Current Task, Workflow Status, and the chain each still derive their own view, even though the specific contradiction found this round is fixed).
+
+### Phase 41 - Stage 1 Becomes a Branching Decision, Not a Checkbox Gate
+
+Chip's point was correct: a "no dialogue" answer was being treated as a prerequisite to satisfy (unlock the same transcript-then-captions pipeline) instead of a branch that changes what work is needed. Implemented the actual decision tree:
+
+```
+Speech present?
+  Yes -> transcript needed -> dialogue captions needed
+  No  -> transcript NOT needed -> meaningful non-speech audio present?
+           Yes -> captions needed (for that non-speech audio)
+           No  -> captions not required
+```
+
+- `js/stage-one-analysis.js` now asks a second question — meaningful non-speech audio — but only once speech has been confirmed absent (no point asking otherwise). No local engine can answer this (no audio-event-detection engine exists in this build), so it's always a direct question, same pattern as speech.
+- `create-transcript` and `create-captions` are now independent exclusions in the Make This Accessible chain (`js/app.js` `matchDirectGoal`), and `js/recommendation-engine.js`'s captions availability now checks Stage 1's actual verdict plus the real execution prerequisite (a completed transcript, only when captions are needed because of dialogue — not when they're needed for non-speech audio, which has no transcript to wait for).
+- **Retired the mechanism from Phase 38/40 that saved a placeholder sentence as a "completed" transcript artifact.** That was architecturally backwards once Stage 1 exists: confirming "no dialogue" is a Stage 1 fact, not a finished transcript. `js/app.js`'s `submitTranscriptReview` no longer creates any artifact or marks `create-transcript` complete when there's nothing to transcribe — it records the Stage 1 answer and closes out.
+- Audio description's ranking now gets a boost when Stage 1 has established there's no dialogue, since it becomes the primary accessibility task for that kind of source rather than one option among several — a small nudge, not a guarantee it'll always rank first.
+
+**Known limitation, not fixable from here**: if you re-test with the same "Walk about the house and front yard.MOV" file you've been using, it may still show "Completed: Create a transcript." That's a real saved artifact from an earlier test round, back when the old placeholder mechanism existed — it's sitting in this browser's local storage for that specific file (keyed by name/size/duration) and gets correctly restored as genuine prior work, the same as any other saved transcript would be. Going forward, new "no dialogue" answers won't create that artifact, but I can't reach into your browser's storage to remove the old one. A fresh copy of the file (or clearing that source's saved data) would show the corrected behavior cleanly.
+
+**Still not implemented**: visual analysis (what audio-description actually needs to determine "is this appropriate for this source"), the full decision tree extending into audio-description itself (right now it's a priority nudge, not a Stage-1-resolved branch the way speech/captions are), and a single authoritative state resolver replacing the several places that still separately compute "current step."
+
+### Phase 42 - A Real Local Analysis Engine, and a Real Bug Fix
+
+Direct response to: "stop treating user answers as the primary Stage 1 analysis system... implement or configure the engines that allow the assistant to make the initial determination itself," and to the specific code contradiction Chip found (a comment saying "must not mark create-transcript completed," followed a few lines later by code that did exactly that).
+
+**The code contradiction was real.** `js/app.js`'s no-dialogue path called `window.WorkflowChain.markCompleted(activeWorkflowChain, 'create-transcript')` — a genuine bug, not just a misleading comment. `js/workflow-chain.js` had no way to say "this step isn't needed" that wasn't also "this step is done," so skipping a step and completing it were forced through the same flag. Added `markNotNeeded`, a real distinct state, and switched the call to it.
+
+**Added a real local analysis engine**, not a heuristic dressed up as one: `js/audio-signal-analysis.js` decodes the actual audio track (the same Web Audio `decodeAudioData` pattern already proven in `js/narration-mixer.js`) and measures real signal energy across the whole file. It runs automatically the moment a local file is selected — no question asked, no button to press.
+
+What it can honestly claim, stated plainly because overclaiming here would cause real harm: it can reliably tell "this track is essentially silent throughout" from "this track has real acoustic content." That's a direct measurement. It **cannot** reliably tell speech apart from music, wind, or footsteps using energy alone — that needs real audio/speech classification, which means a connected AI service, which this build doesn't run automatically. So:
+
+- If the track measures as essentially silent, both the speech and non-speech-audio questions resolve automatically and instantly — no manual questions at all. This is the case that matches "Walk about the house and front yard.MOV" if that recording is in fact near-silent.
+- If the track has real audio content, the automated analysis says so plainly ("found real sound content, but this build cannot automatically tell spoken dialogue apart from music, wind, or other non-speech sound") and the manual question becomes a clearly-labeled fallback for that specific unresolved case — not the default interaction for every file, and not presented as if analysis had determined the answer.
+- If the browser can't decode the file's audio at all (the same class of container/codec issue already flagged for `.mov` playback), that's stated honestly too, and falls back the same way.
+
+**What this is not**: real speech recognition, real audio-event classification, or real scene/visual analysis. Those need an actual trained model — either a connected AI service (already-existing infrastructure in this app) or, if you want a fully local answer, a real ML model shipped and run in-browser, which is a materially larger undertaking than this energy measurement. I did not build a fake classifier that guesses "probably speech" from pitch or rhythm heuristics — a wrong guess there is worse than an honest "I don't know," especially for a tool whose whole purpose is not letting things slip through.
+
+**Not done**: the visual side of Stage 1 (the same local-engine-first pattern, applied to determining whether audio description is warranted) — still entirely unimplemented, and audio-description's ranking is still a priority nudge, not a resolved branch.
+
+### Phase 43 - Analysis Results Reported Separately From Workflow Artifacts
+
+Scoped to exactly the one refinement requested: Current Task must never word a Stage 1 analysis result as if it were a completed workflow artifact.
+
+- `js/stage-one-analysis.js` gained `describeResults(model)`: short, honest lines for each resolved question ("Speech analysis: little or no spoken dialogue", "Audio event analysis: no meaningful non-speech sounds"), entirely separate from artifact completion.
+- `js/app.js`'s `renderCurrentTask` now reports two distinct sentences: `Completed: ...` lists only real workflow artifacts (unchanged — `item.completed` already meant "an actual artifact exists," via `recommendation-engine.js`'s `isPresent`/`hasUsableArtifactText`), and analysis results are appended as their own sentence, never merged into that list.
+
+**This does not retroactively fix an already-contaminated test source.** If "Create a transcript" still appears in Completed for the same file you've been re-testing, that's the same stale placeholder artifact from before Phase 42 — it's a real saved artifact sitting in that source's local storage, genuinely satisfying "an artifact exists," so it's not wrong for the app to report it as completed even though it shouldn't have been created in the first place. Going forward, no new source will accumulate that kind of artifact. I can't clear existing browser storage from here.
+
+Kept to this one change tonight, as directed — no other architectural changes made this round.
+
+### Phase 44 - Fixed a Real Dead End When a Speech Engine IS Configured
+
+Found the bug immediately: `js/stage-one-analysis.js`'s speech question listed `'engine-available'` as a status that would count as resolved, but nothing anywhere ever set that status — so when a transcription engine (OpenAI, in this case) was actually configured and healthy, the question stayed unresolved forever. Media Analysis showed "1 question must be resolved," offered no button, and its own message ("speech analysis will run using OpenAI service when you begin") directly contradicted the permanently-blocked state around it. Make This Accessible could never start.
+
+Fixed: a configured, healthy transcription engine now resolves the question directly — deferred to actually run when the transcript step executes, matching what the message already said. No status value needed to be invented and never set.
+
+### Phase 45 - Yesterday's Fix Was Half Right and Caused This
+
+Phase 44 fixed a real dead end (a configured engine could leave Media Analysis permanently blocked with no button). But the fix itself was wrong in a way that caused this test: it treated "a transcription engine is configured" as resolving the speech question, with no check on whether that engine could actually handle *this* file. For a file over the 50 MB connected-service limit, the app declared "speech analysis will run using OpenAI service when you begin," let Make This Accessible start, ran the whole audio-extraction step, and only then — inside transcript review — discovered what could have been known immediately: it can't run for this file. That's a regression I introduced, not a pre-existing issue.
+
+Fixed: `js/app.js` now checks file size against the connected engine's known limit *before* Stage 1 decides anything (`updateEngineFileCompatibility`, using the exact same check `openTranscriptReview` already made at execution time). `js/stage-one-analysis.js`'s speech question no longer counts as resolved when the configured engine can't accept this file — it falls through to the direct question immediately, in Media Analysis, before the workflow starts. Also stopped it from short-circuiting on "an engine exists" while the free local silence analysis (Phase 42) is still running, since that one costs nothing and should get first chance to answer instead of being preempted by a slower, possibly-billed engine.
+
+**What this doesn't change**: for a file that's both too large for a connected engine *and* has real, non-silent audio content the local engine honestly can't classify (footsteps, ambient house sounds — not total silence), one direct question is still the accurate state of things, not a bug. That's the same fallback Chip endorsed. It should now show up exactly once, in Media Analysis, before anything else runs — not after audio extraction, not buried inside transcript review.
+
+### Phase 46 - Transcription Now Uses the Extracted Audio, Not the Raw Video
+
+Chip's factual point was correct: `CONNECTED_SERVICE_MAX_BYTES` (50 MB) is a single blanket application-level transport safeguard, not a real per-provider API limit — it was never derived from OpenAI's, Azure's, or Gemini's actual documented limits. That part of the critique was right, and it's fixed by not needing that number to represent "the" universal limit anymore (see below).
+
+**But raising the number, or trying each provider in turn with the same payload, would not have fixed a 500 MB-1 GB video.** Here's the real constraint underneath the constant: every connected-service request in this app reads the whole file into memory, converts it to a base64 string in a JS loop, and sends it as one JSON body (`js/app.js`'s `readSourceData`). That approach breaks down well before any provider's nominal size limit, for any provider — encoding and holding a gigabyte-scale base64 string in a browser tab is a real memory/performance wall regardless of whose API receives it. Chunked, resumable, provider-specific upload (Azure batch transcription, Gemini's Files API, true audio splitting with timestamp-preserving merge) is genuinely the correct long-term answer Chip described, and it's a real, multi-session engineering project — I'm not going to claim I built that tonight.
+
+**What's actually fixed, and does address the 500 MB-1 GB case directly**: transcription and caption drafting now send the already-extracted audio-only copy instead of the original video, when one exists. `extract-audio` already runs automatically before `create-transcript` in the Make This Accessible chain, and produces a separate file that scales with duration, not with video resolution/bitrate — a video's audio track is typically a small fraction of the total file size regardless of how large the video itself is. `js/app.js` now looks for that artifact (`findExtractedAudioArtifact`) and routes `transcription-draft`, `caption-draft`, and caption-critique requests through it (`preferExtractedAudio: true`); `audio-description-draft` and `visual-analysis` still correctly use the original video, since those need the actual picture, not just sound.
+
+Also fixed the premature-question problem this caused: before audio extraction has run, the app no longer judges compatibility by the raw video's size at all (`effectiveTranscriptionSourceSize` returns "not yet known" for video pre-extraction) — it waits until extraction completes and checks the real, much smaller file, rather than asking a question upfront based on a number that was never going to be what's actually sent.
+
+**One more thing already in this codebase that's worth knowing about**: automatic fallback to the next configured provider on failure (`handleTranscriptFailure` / `AIProviderLayer.getAlternative`) already existed before tonight — Chip's "if OpenAI can't, try Azure, then Gemini, then local" is already how failures are handled, with one confirmation per new external provider tried. It just wasn't getting a fair chance before, because the size check was being applied to the video instead of the audio.
+
+**Not done, stated plainly**: true per-provider limit awareness (this build's safeguard is still one number, not Azure's actual limit vs. Gemini's actual limit vs. a local endpoint's actual limit), and chunked audio processing for audio that's still too large even after extraction (a multi-hour recording's audio track can still exceed 50 MB). Both are real next steps, not implemented tonight.
