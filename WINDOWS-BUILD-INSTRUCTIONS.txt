@@ -1,0 +1,18 @@
+Windows Installer Build - Increment 2
+
+1. Copy all files and folders from this ZIP into the existing assistant repository.
+   Keep the existing .git directory and repository history. Do not copy the ZIP as a nested folder.
+2. Commit and push in GitHub Desktop.
+3. Open GitHub > repository > Actions > Build Windows Installer.
+4. Choose Run workflow and select the main branch, or use the push-triggered run.
+5. Open the completed run and download OpenDoorAccessibleAssistant-Windows-Installer from Artifacts.
+6. Extract the artifact ZIP and locate the .exe NSIS installer.
+
+This package is source code, not a compiled installer. No Windows build has been executed here.
+The new workflow uses npm install because the repository does not contain a package-lock.json.
+The Tauri icon assets are functional placeholders and may be replaced later with approved ODD branding.
+The app currently uses frontendDist '..'; this is the existing configuration, not a production-hardened resource boundary.
+This increment does not bundle Python, FFmpeg, Whisper, or any AI models.
+The installer is unsigned; Windows may warn when running it.
+If the build fails, copy the failing step and error log into the conversation.
+DesignPhilosophyAndStandards was not modified.
