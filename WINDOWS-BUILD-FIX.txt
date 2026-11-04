@@ -1,0 +1,12 @@
+Windows installer build correction
+
+The failed GitHub Actions build rejected frontendDist: ".." because it included src-tauri and other non-web folders.
+
+Changes:
+- src-tauri/tauri.conf.json now uses ../dist
+- scripts/build-frontend.mjs creates dist and copies the existing frontend and data folders
+- npm run desktop:build now prepares dist before running tauri build
+- GitHub Actions paths include the frontend build script and data directories
+
+Commit and push the replacement repository, then run Build Windows Installer again.
+This fixes the reported configuration error; Windows compilation has not been tested here.

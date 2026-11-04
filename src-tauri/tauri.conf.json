@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "org.opendoordesign.accessibleassistant",
   "build": {
-    "frontendDist": ".."
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [
