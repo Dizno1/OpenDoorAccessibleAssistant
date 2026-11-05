@@ -1,0 +1,17 @@
+ODAA INCREMENT 7 - FOCUS AND PORTABLE WHISPER
+
+Based on OpenDoorAccessibleAssistant(8).zip with Increment 6 changes applied.
+
+Replace ONLY these four files in your existing repository:
+index.html
+js/app.js
+src-tauri/src/lib.rs
+scripts/prepare-windows-engines.ps1
+
+DO NOT replace .git or copy the full project.
+
+Changes: suppress routine workflow focus jumps, remove routine speech-answer checkbox and speech questions, start plans without selecting workflow checkboxes, compile Whisper with portable CPU settings, smoke-test model loading on build runner, retain Increment 6 local failure logs.
+
+Known limitations: Whisper has not been run on your computer; build runner is not your CPU. Other optional review confirmations still exist. Audio description and non-speech classification are not implemented. Some focus movement in unrelated workflows may remain.
+
+Validated: JavaScript syntax, isolated frontend build, ZIP integrity. Windows installer not built here.

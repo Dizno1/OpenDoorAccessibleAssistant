@@ -554,7 +554,7 @@
         }
         lastTranscriptProviderName = 'Bundled local Whisper engine';
 
-        transcriptTextInput.focus();
+        // Keep focus where the user left it; announce the completed result instead.
       } catch (error) {
         transcriptReviewStatus.textContent = `Automatic transcription failed. The assistant has not determined whether speech is present. ${error.message || error} You can retry the automatic draft; manual entry is optional.`;
       } finally { draftTranscriptButton.disabled = false; }
@@ -656,7 +656,7 @@
     // the same moment risks exactly the kind of announcement collision a screen reader can garble
     // when it lands alongside a burst of newly-inserted cue fields.
     captionReviewSummary.textContent = `Caption draft ready from ${result.providerName}. ${cues.length} cue${cues.length === 1 ? '' : 's'}. Duration covered: ${durationCovered}. Timing validation ${errors.length ? 'repaired automatically' : 'passed'}.${repairNote} Review with the Viewer, then confirm and save, or use Edit individual caption cues for detailed changes.`;
-    captionReviewSummary.focus();
+    /* Focus remains with the user; status is announced without navigation. */
   }
 
   // Required fallback behavior, matching the transcript pattern: keep trying healthy compatible
@@ -670,7 +670,7 @@
       captionReviewStatus.textContent = 'Automated generation could not produce a usable caption draft after trying every available method. Manual authoring is available as an advanced option below. You may need help from someone who can review the video to caption it manually.';
       captionCueEditor.open = true;
       if (!captionCues.children.length) addCaptionCue();
-      captionReviewSummary.focus();
+      /* Focus remains with the user; status is announced without navigation. */
       return;
     }
     const costNote = alternative.external ? ' The video or audio will be sent to an outside service and charges may apply.' : ' This stays on this device.';
@@ -740,7 +740,7 @@
     audioDescriptionCueEditor.open = false;
     audioDescriptionReviewSummary.textContent = `Audio-description draft ready for review. ${finalCues.length} narration cue${finalCues.length === 1 ? '' : 's'}. ${finalErrors.length ? 'Some cue timing needs attention — open Edit individual audio-description cues to review it.' : 'Timing validation passed.'} Review with the Viewer, then approve, request another draft, or use Edit individual audio-description cues for detailed changes.`;
     audioDescriptionReviewStatus.textContent = `${producedBy} created this draft.`;
-    audioDescriptionReviewSummary.focus();
+    /* Focus remains with the user; status is announced without navigation. */
   }
 
   // Required behavior: never leave a blind user facing a blank required narration field. Keep
@@ -752,7 +752,7 @@
     if (!alternative) {
       audioDescriptionReviewSummary.textContent = 'The assistant could not generate a reliable audio-description draft after trying every available method. Manual authoring is available as an advanced option below. A blind user may need assistance from someone who can review the visual content to write descriptions manually.';
       audioDescriptionReviewStatus.textContent = '';
-      audioDescriptionReviewSummary.focus();
+      /* Focus remains with the user; status is announced without navigation. */
       return;
     }
     const costNote = alternative.external ? ' The video will be sent to an outside service and charges may apply.' : ' This stays on this device.';
@@ -1084,7 +1084,7 @@
     mediaAnalysisSection.hidden = false;
 
     if (!status.unresolved.length) {
-      mediaAnalysisSummary.textContent = 'Media analysis is complete for what this source needs.';
+      mediaAnalysisSummary.textContent = 'Available media checks have finished. Speech and meaningful sound analysis may still be pending.';
       mediaAnalysisQuestions.innerHTML = status.questions.map(describeResolvedQuestion).join('');
       return;
     }
@@ -1093,47 +1093,10 @@
     mediaAnalysisQuestions.innerHTML = status.questions.map((question) => {
       if (question.resolved) return describeResolvedQuestion(question);
       if (question.id === 'speech') {
-        if (question.analyzing) {
-          return `<div class="media-analysis-question">
-            <p>Analyzing the audio track automatically. This does not require an answer from you unless the automatic analysis can't determine it.</p>
-          </div>`;
-        }
-        const note = currentKnowledgeModel.audio.speech.localAnalysisNote;
-        const explanation = note === 'has-audio-content'
-          ? 'Automated analysis of the audio track found real sound content, but this build cannot automatically tell spoken dialogue apart from music, wind, or other non-speech sound.'
-          : note === 'unsupported'
-            ? "Automated analysis could not be run on this file's audio track (the browser could not decode it)."
-            : '';
-        if (question.engineAvailable) {
-          return `<div class="media-analysis-question">
-            ${explanation ? `<p>${escapeHtml(explanation)}</p>` : ''}
-            <p>Whether this recording contains spoken dialogue: speech analysis will run using ${escapeHtml(question.providerName || 'the configured assistance service')} when you begin.</p>
-          </div>`;
-        }
-        if (window.__TAURI__?.core?.invoke) {
-          return `<div class="media-analysis-question"><p>Speech has not yet been verified. The bundled local speech engine will analyze this recording during transcription. No answer is required from you.</p></div>`;
-        }
-        const reasonText = question.engineFileTooLarge
-          ? `Speech analysis has not been completed because this file is larger than the configured speech-analysis service accepts.`
-          : 'Speech analysis has not been completed because no working speech-analysis engine is configured.';
-        return `<div class="media-analysis-question">
-          ${explanation ? `<p>${escapeHtml(explanation)}</p>` : ''}
-          <p>${escapeHtml(reasonText)}</p>
-          <div class="next-actions">
-            <button type="button" id="configure-speech-engine">Configure a speech-analysis engine</button>
-            <button type="button" id="report-speech-present">This recording has spoken dialogue</button>
-            <button type="button" id="report-speech-none">This recording has little or no spoken dialogue</button>
-          </div>
-        </div>`;
+        return `<div class="media-analysis-question"><p>Speech presence has not yet been verified. The assistant will analyze the audio automatically. No answer is required from you.</p></div>`;
       }
       if (question.id === 'nonSpeechAudio') {
-        return `<div class="media-analysis-question">
-          <p>No spoken dialogue was found, so a transcript isn't needed. Are there meaningful non-speech sounds — music, narration-like sound effects, significant environmental audio — that someone who can't hear this recording would need described in captions?</p>
-          <div class="next-actions">
-            <button type="button" id="report-non-speech-present">Yes, there are meaningful sounds</button>
-            <button type="button" id="report-non-speech-none">No, captions aren't needed</button>
-          </div>
-        </div>`;
+        return `<div class="media-analysis-question"><p>Meaningful non-speech sounds have not yet been assessed automatically. This remains an open accessibility task.</p></div>`;
       }
       return '';
     }).join('');
@@ -1179,7 +1142,7 @@
     window.SharedKnowledge.save(currentKnowledgeModel);
     renderMediaAnalysis();
     renderCurrentTask();
-    mediaAnalysisSection.focus();
+    /* Focus remains with the user; status is announced without navigation. */
   }
 
   function openAssistanceSettings() {
@@ -1196,7 +1159,7 @@
     currentKnowledgeModel.audio.speech.status = status;
     window.SharedKnowledge.save(currentKnowledgeModel);
     renderMediaAnalysis();
-    mediaAnalysisSection.focus();
+    /* Focus remains with the user; status is announced without navigation. */
   }
 
   function resetMediaAnalysis() {
@@ -1584,7 +1547,7 @@
     const match = matchDirectGoal(requestedGoal);
     if (match && match.stageOneBlocked) {
       directGoalStatus.textContent = 'Media analysis is not yet complete for this source. Resolve the question in Media Analysis, above, before Make This Accessible can build an accurate plan.';
-      mediaAnalysisSection.focus();
+      /* Focus remains with the user; status is announced without navigation. */
       return;
     }
     if (!match || (!match.intent && !match.chain)) {
@@ -1625,32 +1588,13 @@
     activeWorkflowChain.startedAt = new Date().toISOString();
     workflowChainSection.hidden = true;
     announceWorkflowStatus('Make This Accessible started. The application will continue automatically and pause only when your review is required.');
-    progressSection.focus();
+    /* Focus remains with the user; status is announced without navigation. */
     continueWorkflowChain();
   }
 
   function openWorkflowChainReview(chain) {
-    activeWorkflowChain = chain;
-    workflowChainSteps.innerHTML = '';
-    chain.steps.forEach((step, index) => {
-      const wrapper = document.createElement('div');
-      wrapper.className = 'workflow-chain-option';
-      const id = `workflow-chain-step-${index + 1}`;
-      const stateLabel = !step.selected ? 'Not needed for this source' : step.completed ? 'Completed and skipped' : step.blocked ? 'Blocked' : step.requiresReview ? 'Ready, review checkpoint required' : 'Ready to execute';
-      wrapper.innerHTML = `
-        <label for="${id}">
-          <input id="${id}" type="checkbox" name="workflowChainStep" value="${escapeHtml(step.workflowId)}" ${step.selected ? 'checked' : ''} ${step.completed || step.blocked ? 'disabled' : ''}>
-          <span>${escapeHtml(step.title)}</span>
-        </label>
-        <p>${escapeHtml(step.description)}</p>
-        <p class="workflow-chain-state">Status: ${escapeHtml(stateLabel)}</p>
-      `;
-      workflowChainSteps.appendChild(wrapper);
-    });
-    workflowChainSummary.textContent = `${chain.steps.length} workflow steps were evaluated. Select the available work you want the application to coordinate.`;
-    workflowChainStatus.textContent = '';
-    workflowChainSection.hidden = false;
-    workflowChainSection.focus();
+    // Expert mode: execute the proposed plan, rather than asking the user to select tasks.
+    startWorkflowChain(chain);
   }
 
   function submitWorkflowChain(event) {
@@ -1670,7 +1614,7 @@
     activeWorkflowChain.startedAt = new Date().toISOString();
     workflowChainSection.hidden = true;
     announceWorkflowStatus('The accessibility plan started. The first workflow is being prepared.');
-    progressSection.focus();
+    /* Focus remains with the user; status is announced without navigation. */
     continueWorkflowChain();
   }
 
@@ -1691,7 +1635,7 @@
       // single announcement is enough. Prepend the completion line to it rather than also
       // announcing "complete" in the banner and the (now hidden) Workflow Status region first.
       currentTaskSummary.textContent = `Make This Accessible is complete. ${summary.completed} workflow${summary.completed === 1 ? '' : 's'} completed. ${currentTaskSummary.textContent}`;
-      currentTaskSection.focus();
+      /* Focus remains with the user; status is announced without navigation. */
       return;
     }
     if (step.blocked) {
@@ -1699,7 +1643,7 @@
       renderGoalSuggestions(currentInspection.mediaType);
       renderCurrentTask();
       currentTaskSummary.textContent = `Make This Accessible paused before ${step.title}. ${activeWorkflowChain.pauseReason} ${currentTaskSummary.textContent}`;
-      currentTaskSection.focus();
+      /* Focus remains with the user; status is announced without navigation. */
       return;
     }
     if (step.intent.workflowId === 'render-accessible-video') { offerRenderLaterPause(step.intent); return; }
@@ -1720,7 +1664,7 @@
     renderLaterButton.hidden = false;
     currentTaskNextButton.hidden = true;
     currentTaskSection.hidden = false;
-    currentTaskSection.focus();
+    /* Focus remains with the user; status is announced without navigation. */
     renderLaterTimer = window.setTimeout(() => {
       renderLaterTimer = null;
       renderLaterButton.hidden = true;
@@ -1744,7 +1688,7 @@
       const renderIntent = intents.find((item) => item.workflowId === 'render-accessible-video');
       if (renderIntent) runIntent(renderIntent);
     };
-    currentTaskSection.focus();
+    /* Focus remains with the user; status is announced without navigation. */
   });
 
   function renderWorkflowChainState() {
@@ -1761,7 +1705,7 @@
     workflowChainStatus.textContent = '';
     setStatus(message || 'The remaining accessibility plan was cancelled. Completed work was kept.');
     renderCurrentTask();
-    if (!currentTaskSection.hidden) currentTaskSection.focus(); else directGoalSection.focus();
+    /* No automatic focus movement on workflow completion or cancellation. */
   }
 
   function resetWorkflowChain() {
@@ -1829,7 +1773,7 @@
     refreshAfterJobStateChange();
     syncCurrentSourceToProject();
     progressSection.hidden = false;
-    progressSection.focus();
+    /* Focus remains with the user; status is announced without navigation. */
     executionEngine.enqueue(activeJob);
   }
 
@@ -1844,14 +1788,15 @@
     const review = window.TranscriptReview.build(currentFile ? currentFile.name : currentInspection.name);
     const alreadyReportedNone = Boolean(currentKnowledgeModel && currentKnowledgeModel.audio && currentKnowledgeModel.audio.speech && currentKnowledgeModel.audio.speech.status === 'reported-none');
     transcriptTitleInput.value = review.suggestedTitle;
-    transcriptNoSpeechInput.checked = alreadyReportedNone;
+    transcriptNoSpeechInput.checked = false; // Historical user reports do not override automatic detection.
+    transcriptNoSpeechInput.closest("label").hidden = true;
     transcriptTextInput.value = '';
     transcriptReviewedInput.checked = false;
     transcriptReviewStatus.textContent = '';
     updateTranscriptReviewedLabel();
     transcriptReviewSummary.textContent = 'The assistant will attempt automatic local speech recognition. Review or correct the resulting transcript if needed. Manual entry is an optional fallback, not a prerequisite.';
     transcriptReviewSection.hidden = false;
-    transcriptReviewSection.focus();
+    // Do not move focus when the editor appears.
     // If a compatible transcription provider is already available, request a draft right away
     // instead of waiting for a separate manual click, so goal-driven workflows like "Transcribe
     // this audio" and "Make this video accessible" actually reach automatic provider selection
@@ -1862,7 +1807,7 @@
     // file is already known to exceed what the connected service accepts, rather than starting the
     // attempt and failing mid-flow into a confirm dialog — the same fact should be known before
     // the attempt starts, not discovered partway through it.
-    if (alreadyReportedNone) return;
+    // Re-run analysis even when an earlier session contained a manual speech report.
     const capability = window.AIProviderLayer.getCapability('transcription-draft');
     if (!capability.canRun && !window.__TAURI__?.core?.invoke) {
       transcriptReviewStatus.textContent = 'Automatic transcription is unavailable in this environment. The assistant cannot yet determine whether speech is present.';
@@ -1897,7 +1842,7 @@
         window.WorkflowChain.markNotNeeded(activeWorkflowChain, 'create-transcript');
         continueWorkflowChain();
       } else {
-        currentTaskSection.focus();
+        /* Focus remains with the user; status is announced without navigation. */
       }
       return;
     }
@@ -1988,10 +1933,10 @@
       // auto-running a draft that can't succeed.
       captionCueEditor.open = true;
       captionReviewSummary.textContent = 'The transcript for this recording was confirmed to have little or no spoken dialogue, so a caption draft was not requested automatically. If there are meaningful environmental sounds worth captioning, use Request timed caption draft or add cues manually below. Otherwise, captions may not be needed for this recording.';
-      captionReviewSummary.focus();
+      /* Focus remains with the user; status is announced without navigation. */
     } else if (window.AIProviderLayer.getCapability('caption-draft').canRun) {
       captionReviewSummary.textContent = 'Creating a caption draft using the best available method.';
-      captionReviewSummary.focus();
+      /* Focus remains with the user; status is announced without navigation. */
       // Deferred one tick so the draft's own DOM insertion and live-region updates don't start
       // while this focus-move announcement is still being spoken.
       window.setTimeout(requestCaptionDraft, 0);
@@ -1999,12 +1944,12 @@
       review.cues.forEach((cue) => addCaptionCue(cue));
       captionCueEditor.open = true;
       captionReviewSummary.textContent = 'No caption-generation service is currently available. Starter cues were created from the completed transcript instead. Review every cue against the Viewer and correct the timing and text.';
-      captionReviewSummary.focus();
+      /* Focus remains with the user; status is announced without navigation. */
     } else {
       captionReviewSummary.textContent = 'No caption-generation service is currently available, and no completed transcript exists to create starter cues from. Manual authoring is available as an advanced option below. You may need help from someone who can review the video to caption it manually.';
       captionCueEditor.open = true;
       addCaptionCue();
-      captionReviewSummary.focus();
+      /* Focus remains with the user; status is announced without navigation. */
     }
   }
 
@@ -2080,13 +2025,13 @@
         cues.forEach((cue) => addCaptionCue(cue));
         captionReviewStatus.textContent = `Timing was automatically corrected (${errors.length} issue${errors.length === 1 ? '' : 's'} fixed). Review the corrected cues, then save again.`;
         captionCueEditor.open = true;
-        captionReviewSummary.focus();
+        /* Focus remains with the user; status is announced without navigation. */
         return;
       }
       const types = Array.from(new Set(errors.map((message) => message.replace(/^Cue \d+/, 'A cue')))).slice(0, 3);
       captionReviewStatus.textContent = `${errors.length} caption cue${errors.length === 1 ? ' has' : 's have'} a timing or text problem: ${types.join(' ')} Open Edit individual caption cues to find and fix the specific cue.`;
       captionCueEditor.open = true;
-      captionReviewSummary.focus();
+      /* Focus remains with the user; status is announced without navigation. */
       return;
     }
     if (!captionsReviewedInput.checked) {
@@ -2176,7 +2121,7 @@
     audioDescriptionReviewSection.hidden = false;
     if (window.AIProviderLayer.getCapability('audio-description-draft').canRun) {
       audioDescriptionReviewSummary.textContent = 'Creating an audio-description draft using the best available method.';
-      audioDescriptionReviewSummary.focus();
+      /* Focus remains with the user; status is announced without navigation. */
       requestAudioDescriptionDraft();
     } else {
       // No blank narration field is ever shown here. Nothing exists to generate a draft with,
@@ -2185,7 +2130,7 @@
       audioDescriptionReviewSummary.textContent = 'No audio-description generation service is currently available, so no draft could be created. Manual authoring is available as an advanced option below. A blind user may need assistance from someone who can review the visual content to write descriptions manually.';
       audioDescriptionCueEditor.open = true;
       addAudioDescriptionCue();
-      audioDescriptionReviewSummary.focus();
+      /* Focus remains with the user; status is announced without navigation. */
     }
   }
 
@@ -2248,7 +2193,7 @@
       const types = Array.from(new Set(errors.map((message) => message.replace(/^Description cue \d+/, 'A cue')))).slice(0, 3);
       audioDescriptionReviewStatus.textContent = `${errors.length} description cue${errors.length === 1 ? ' has' : 's have'} a timing or narration problem: ${types.join(' ')} Open Edit individual audio-description cues to find and fix the specific cue.`;
       audioDescriptionCueEditor.open = true;
-      audioDescriptionReviewSummary.focus();
+      /* Focus remains with the user; status is announced without navigation. */
       return;
     }
     if (!audioDescriptionReviewedInput.checked) {
@@ -2593,7 +2538,7 @@
       setStatus(`The accessibility plan paused because ${job.intent.title} could not be completed. Completed work was kept.`);
     }
     renderCurrentTask();
-    if (!currentTaskSection.hidden) currentTaskSection.focus(); else directGoalSection.focus();
+    /* No automatic focus movement on workflow completion or cancellation. */
   }
 
   // The retry path for when browser rendering needs a fresh, direct user gesture: calling
@@ -2615,7 +2560,7 @@
     jobStatus.textContent = 'The workflow was cancelled. No output was saved.';
     if (activeWorkflowChain && job.chainId === activeWorkflowChain.id) cancelWorkflowChain('The current workflow and remaining accessibility plan were cancelled. Completed work was kept.');
     renderCurrentTask();
-    if (!currentTaskSection.hidden) currentTaskSection.focus(); else directGoalSection.focus();
+    /* No automatic focus movement on workflow completion or cancellation. */
   }
 
   function updateActiveJobStatus(job, status) {
@@ -2722,7 +2667,7 @@
       fileInput.click();
     });
 
-    resultsSection.focus();
+    // Results are announced without moving the keyboard cursor.
   }
 
   function resetProgress() {
@@ -2921,7 +2866,7 @@
     if (activeWorkflowChain) { activeWorkflowChain.status = 'paused'; workflowChainSection.hidden = true; }
     setStatus(message);
     renderCurrentTask();
-    if (!currentTaskSection.hidden) currentTaskSection.focus(); else directGoalSection.focus();
+    /* No automatic focus movement on workflow completion or cancellation. */
   }
 
   cancelAudioDescriptionReviewButton.addEventListener('click', () => { resetAudioDescriptionReview(); if (activeWorkflowChain) pauseWorkflowChainStep('The audio description checkpoint was left incomplete. Choose the goal again to resume; the rest of the accessibility plan was kept.'); else directGoalSection.focus(); });
