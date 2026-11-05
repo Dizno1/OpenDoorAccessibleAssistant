@@ -14,9 +14,18 @@ foreach ($name in @('ffmpeg.exe','ffprobe.exe')) {
   Copy-Item $found.FullName (Join-Path $dest $name)
 }
 Write-Host 'Downloading whisper.cpp Windows executable.'
+# Upstream uses platform-specific names, such as whisper-bin-win-x64.zip.
+# Prefer a stable CPU x64 package and report available assets if none matches.
 $release = Invoke-RestMethod 'https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest'
-$asset = $release.assets | Where-Object { $_.name -match '^whisper-bin-x64\.zip$' } | Select-Object -First 1
-if (-not $asset) { throw 'whisper.cpp release has no whisper-bin-x64.zip; check upstream asset names before changing this script.' }
+$assets = @($release.assets)
+$asset = $assets | Where-Object {
+  $_.name -match '^whisper-bin-(win-)?x64\.zip$'
+} | Select-Object -First 1
+if (-not $asset) {
+  $available = ($assets | ForEach-Object { $_.name }) -join ', '
+  throw "No compatible Windows x64 CPU whisper.cpp asset in release $($release.tag_name). Available assets: $available"
+}
+Write-Host "Selected whisper.cpp $($release.tag_name) asset: $($asset.name)"
 $wzip = Join-Path $temp 'whisper.zip'
 Invoke-WebRequest $asset.browser_download_url -OutFile $wzip
 Expand-Archive $wzip -DestinationPath (Join-Path $temp 'whisper') -Force
@@ -24,7 +33,9 @@ $cli = Get-ChildItem (Join-Path $temp 'whisper') -Recurse -Filter 'whisper-cli.e
 if (-not $cli) { throw 'whisper-cli.exe missing from archive' }
 Copy-Item $cli.FullName (Join-Path $dest 'whisper-cli.exe')
 # whisper.cpp Windows binaries may depend on DLLs from the same release.
-Get-ChildItem $cli.DirectoryName -Filter '*.dll' | ForEach-Object { Copy-Item $_.FullName (Join-Path $dest $_.Name) }
+Get-ChildItem $cli.DirectoryName -Filter '*.dll' | ForEach-Object { Copy-Item $_.FullName (Join-Path $dest $_.Name) -Force }
+# Verify the executable and its neighboring libraries were included before packaging.
+Write-Host "Bundled whisper-cli.exe with $(@(Get-ChildItem $dest -Filter '*.dll').Count) DLL dependencies."
 Write-Host 'Downloading English speech recognition model.'
 Invoke-WebRequest 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin' -OutFile (Join-Path $dest 'ggml-base.en.bin')
 foreach ($name in @('ffmpeg.exe','ffprobe.exe','whisper-cli.exe','ggml-base.en.bin')) {
