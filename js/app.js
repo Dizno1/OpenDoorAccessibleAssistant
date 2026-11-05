@@ -66,6 +66,8 @@
     const completed = intents.filter((item) => item.completed);
     const remaining = intents.filter((item) => !item.completed);
     const nextAvailable = pickNextAction(remaining);
+    // Do not advertise a generic utility action as the answer to a user's explicit goal.
+    const explicitGoal = directGoalInput.dataset.userEdited === 'true' && directGoalInput.value.trim();
     const analysisResults = currentKnowledgeModel ? window.StageOneAnalysis.describeResults(currentKnowledgeModel) : [];
     if (!completed.length && !analysisResults.length && !nextAvailable) { currentTaskSection.hidden = true; return; }
     currentTaskSection.hidden = false;
@@ -75,7 +77,10 @@
     const completedText = completed.length ? `Completed: ${completed.map((item) => `${item.title}`).join(', ')}.` : 'No workflow artifacts completed yet.';
     const analysisText = analysisResults.length ? ` ${analysisResults.join('. ')}.` : '';
     const summaryPrefix = `${completedText}${analysisText}`;
-    if (nextAvailable) {
+    if (explicitGoal) {
+      currentTaskSummary.textContent = `${summaryPrefix} Your request: ${explicitGoal}. Select Start to check whether it can be performed.`;
+      currentTaskNextButton.hidden = true;
+    } else if (nextAvailable) {
       currentTaskSummary.textContent = `${summaryPrefix} Next recommended action: ${nextAvailable.title}.`;
       currentTaskNextButton.hidden = false;
       currentTaskNextButton.textContent = nextAvailable.actionLabel || nextAvailable.title;
@@ -770,6 +775,7 @@
     resetWorkflowChain();
 
     contentInput.value = file.name;
+    contentInput.dataset.loadedSource = file.name;
     contentHelp.textContent = `${file.name} selected. The file stays on this device.`;
 
     setStatus(`Checking ${file.name}.`);
@@ -792,7 +798,7 @@
       directGoalSection.hidden = false;
       renderGoalSuggestions(currentInspection.mediaType);
     renderCurrentTask();
-      directGoalInput.value = suggestedGoal(currentInspection.mediaType);
+      if (directGoalInput.dataset.userEdited !== 'true') directGoalInput.value = suggestedGoal(currentInspection.mediaType);
       directGoalStatus.textContent = '';
       setStatus(buildContentAcknowledgement(currentInspection, false) + lastRestorationNote);
     } catch (error) {
@@ -809,7 +815,7 @@
     const type = titleCase(inspection.mediaType);
     const parts = isUrl ? [`${type} address detected.`] : [`${inspection.name} selected.`, `${type} detected.`];
     if (inspection.durationSeconds) parts.push(`Duration: ${inspection.durationLabel}.`);
-    parts.push(`Suggested request: ${suggestedGoal(inspection.mediaType)}.`);
+    if (inspection.mediaType !== 'unknown') parts.push(`Suggested request: ${suggestedGoal(inspection.mediaType)}.`);
     return parts.join(' ');
   }
 
@@ -834,12 +840,17 @@
   async function handleUrl(rawUrl) {
     const value = String(rawUrl || '').trim();
     if (!value) { contentHelp.textContent = 'Choose a file or enter a web address.'; contentInput.focus(); return; }
+    if (currentFile && value === contentInput.dataset.loadedSource) {
+      contentHelp.textContent = `${currentFile.name} is already loaded and ready.`;
+      return;
+    }
     if (looksLikeLocalFileReference(value)) {
       contentHelp.textContent = describeLocalFileReference(value);
       chooseFileButton.focus();
       return;
     }
 
+    contentInput.dataset.loadedSource = '';
     currentFile = null;
     currentSource = null;
     currentInspection = null;
@@ -875,6 +886,7 @@
         url: currentInspection.sourceUrl
       };
       contentInput.value = currentInspection.sourceUrl;
+      contentInput.dataset.loadedSource = currentInspection.sourceUrl;
       contentHelp.textContent = `Using ${currentInspection.sourceHost}.`;
       fileInput.value = '';
 
@@ -891,7 +903,7 @@
       directGoalSection.hidden = false;
       renderGoalSuggestions(currentInspection.mediaType);
     renderCurrentTask();
-      directGoalInput.value = suggestedGoal(currentInspection.mediaType);
+      if (directGoalInput.dataset.userEdited !== 'true') directGoalInput.value = suggestedGoal(currentInspection.mediaType);
       directGoalStatus.textContent = '';
       setStatus(buildContentAcknowledgement(currentInspection, true) + lastRestorationNote);
     } catch (error) {
@@ -1438,7 +1450,7 @@
     if (mediaType === 'video') return 'Make this video accessible';
     if (mediaType === 'document') return 'Extract the text';
     if (mediaType === 'archive') return 'List what is inside';
-    return 'Create an accessibility package';
+    return '';
   }
 
   // Only requests that matchDirectGoal() actually recognizes are offered as suggestions.
@@ -1449,7 +1461,7 @@
     if (mediaType === 'image') return ['Describe this picture', 'Detect text in this image', 'Compress this image', 'Resize this image'];
     if (mediaType === 'document') return ['Extract the text', 'Detect text in this document'];
     if (mediaType === 'archive') return ['List what is inside'];
-    return ['Create an accessibility package'];
+    return [];
   }
 
   function renderGoalSuggestions(mediaType) {
@@ -1496,6 +1508,10 @@
 
   async function submitDirectGoal(event) {
     event.preventDefault();
+    if (currentFile && contentInput.value.trim() !== contentInput.dataset.loadedSource) {
+      directGoalStatus.textContent = 'The source field has changed. Choose the new file or restore the loaded filename before starting.';
+      return;
+    }
     if (!currentInspection) {
       const pendingValue = contentInput.value.trim();
       if (pendingValue && looksLikeLocalFileReference(pendingValue)) {
@@ -1512,7 +1528,12 @@
         return;
       }
     }
-    const match = matchDirectGoal(directGoalInput.value);
+    const requestedGoal = directGoalInput.value.trim();
+    if (currentInspection.mediaType === 'document' && /(?:fill(?:able)?|interactive|form fields?|checkboxes|check boxes)/i.test(requestedGoal)) {
+      directGoalStatus.textContent = 'You requested an accessible fillable document. This build can display the PDF, but it cannot yet create or validate interactive PDF form fields. No form was changed or saved. A local PDF form-remediation engine must be installed and verified before this operation can run.';
+      return;
+    }
+    const match = matchDirectGoal(requestedGoal);
     if (match && match.stageOneBlocked) {
       directGoalStatus.textContent = 'Media analysis is not yet complete for this source. Resolve the question in Media Analysis, above, before Make This Accessible can build an accurate plan.';
       mediaAnalysisSection.focus();
@@ -2731,6 +2752,14 @@
     }
   });
 
+  directGoalInput.addEventListener('input', () => {
+    directGoalInput.dataset.userEdited = 'true';
+    if (currentInspection) renderCurrentTask();
+  });
+  // A datalist suggestion must not be concatenated with existing text when users type.
+  directGoalInput.addEventListener('focus', () => {
+    if (directGoalInput.dataset.userEdited !== 'true' && directGoalInput.value) directGoalInput.select();
+  });
   workflowChainForm.addEventListener('submit', submitWorkflowChain);
   cancelWorkflowChainButton.addEventListener('click', () => cancelWorkflowChain());
   directGoalForm.addEventListener('submit', submitDirectGoal);

@@ -1,0 +1,23 @@
+Open Door Accessible Assistant - Windows Increment 2
+
+Scope: source-state and intent reliability correction. This is NOT yet an automated transcription or fillable PDF engine build.
+
+Changes:
+1. Preserve user-edited requests when a new source is inspected.
+2. Select the existing suggested request on focus so typing replaces it instead of appending to it.
+3. Show the user's explicit request in Current task instead of a generic utility suggestion.
+4. Recognize requests to make a document fillable and report accurately that no PDF field creation engine is available yet. No document is modified.
+5. Do not recommend an accessibility package for unknown URLs.
+6. Avoid telling users to choose a file again if the loaded filename is still present.
+
+JAWS tests:
+A. Copy a PDF from File Explorer and paste into Add content. Confirm the file is loaded.
+B. Tab to What can I help you accomplish today? Type make this fillable. Confirm old suggested text is replaced.
+C. Press Start. Confirm a specific explanation that interactive PDF form creation is not yet available, and no success claim.
+D. Confirm Current task reflects the typed request, not Save information about this file.
+E. Paste an unsupported URL. Confirm no unsupported automatic package recommendation.
+F. Paste a video. Confirm its loaded filename does not trigger a false request to choose the file again.
+
+Limitations: no native PDF form editing, no engine installation or Whisper integration, no Windows JAWS validation in this environment. Installer must be built and tested via GitHub Actions.
+
+Only OpenDoorAccessibleAssistant is changed. DesignPhilosophyAndStandards is untouched.
