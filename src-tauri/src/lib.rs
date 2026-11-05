@@ -38,8 +38,19 @@ async fn transcribe_local(app: tauri::AppHandle, file_name: String, file_base64:
             fs::write(&input, bytes).map_err(|e| e.to_string())?;
             let conversion = Command::new(ffmpeg).args(["-nostdin", "-y", "-i"]).arg(&input).args(["-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le"]).arg(&audio).output().map_err(|e| e.to_string())?;
             if !conversion.status.success() { return Err(format!("Audio extraction failed: {}", String::from_utf8_lossy(&conversion.stderr).chars().take(700).collect::<String>())); }
-            let recognition = Command::new(whisper).arg("-m").arg(model).arg("-f").arg(&audio).arg("-osrt").arg("-of").arg(&output_prefix).arg("-nt").output().map_err(|e| e.to_string())?;
-            if !recognition.status.success() { return Err(format!("Local speech recognition failed: {}", String::from_utf8_lossy(&recognition.stderr).chars().take(700).collect::<String>())); }
+            // Force CPU inference: bundled Windows builds must not depend on a working GPU backend.
+            let recognition = Command::new(&whisper).arg("-ng").arg("-m").arg(&model).arg("-f").arg(&audio).arg("-osrt").arg("-of").arg(&output_prefix).arg("-nt").output().map_err(|e| e.to_string())?;
+            if !recognition.status.success() {
+                // Preserve the complete engine output for diagnosis without flooding screen readers.
+                let log_dir = workspace_root(&app)?.join("Logs");
+                fs::create_dir_all(&log_dir).map_err(|e| e.to_string())?;
+                let log_path = unique_destination(&log_dir, "Local transcription failure.txt");
+                let diagnostic = format!("Command: whisper-cli -ng -m [bundled model] -f [temporary audio] -osrt\nExit: {}\n\nSTDERR:\n{}\n\nSTDOUT:\n{}", recognition.status, String::from_utf8_lossy(&recognition.stderr), String::from_utf8_lossy(&recognition.stdout));
+                fs::write(&log_path, diagnostic).map_err(|e| e.to_string())?;
+                let tail = String::from_utf8_lossy(&recognition.stderr);
+                let useful = tail.lines().rev().find(|line| { let lower = line.to_ascii_lowercase(); lower.contains("error") || lower.contains("failed") || lower.contains("abort") }).unwrap_or("Speech recognition exited unsuccessfully.");
+                return Err(format!("Local speech recognition failed. {} Full diagnostic log: {}", useful.chars().take(220).collect::<String>(), log_path.display()));
+            }
             let srt = fs::read_to_string(output_prefix.with_extension("srt")).map_err(|e| format!("Transcription completed without an SRT file: {}", e))?;
             if srt.trim().is_empty() { return Err("Speech recognition returned no spoken content.".into()); }
             Ok(srt)

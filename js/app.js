@@ -556,7 +556,7 @@
 
         transcriptTextInput.focus();
       } catch (error) {
-        transcriptReviewStatus.textContent = `Local transcription could not finish: ${error.message || error}`;
+        transcriptReviewStatus.textContent = `Automatic transcription failed. The assistant has not determined whether speech is present. ${error.message || error} You can retry the automatic draft; manual entry is optional.`;
       } finally { draftTranscriptButton.disabled = false; }
       return;
     }
@@ -1109,6 +1109,9 @@
             ${explanation ? `<p>${escapeHtml(explanation)}</p>` : ''}
             <p>Whether this recording contains spoken dialogue: speech analysis will run using ${escapeHtml(question.providerName || 'the configured assistance service')} when you begin.</p>
           </div>`;
+        }
+        if (window.__TAURI__?.core?.invoke) {
+          return `<div class="media-analysis-question"><p>Speech has not yet been verified. The bundled local speech engine will analyze this recording during transcription. No answer is required from you.</p></div>`;
         }
         const reasonText = question.engineFileTooLarge
           ? `Speech analysis has not been completed because this file is larger than the configured speech-analysis service accepts.`
@@ -1846,7 +1849,7 @@
     transcriptReviewedInput.checked = false;
     transcriptReviewStatus.textContent = '';
     updateTranscriptReviewedLabel();
-    transcriptReviewSummary.textContent = `Use the Viewer for ${currentFile ? currentFile.name : currentInspection.name} to check whether it has spoken dialogue. If it does, enter and review the spoken content below. If it doesn't, check "little or no spoken dialogue in this recording" instead of leaving the text blank.`;
+    transcriptReviewSummary.textContent = 'The assistant will attempt automatic local speech recognition. Review or correct the resulting transcript if needed. Manual entry is an optional fallback, not a prerequisite.';
     transcriptReviewSection.hidden = false;
     transcriptReviewSection.focus();
     // If a compatible transcription provider is already available, request a draft right away
@@ -1861,7 +1864,10 @@
     // the attempt starts, not discovered partway through it.
     if (alreadyReportedNone) return;
     const capability = window.AIProviderLayer.getCapability('transcription-draft');
-    if (!capability.canRun) return;
+    if (!capability.canRun && !window.__TAURI__?.core?.invoke) {
+      transcriptReviewStatus.textContent = 'Automatic transcription is unavailable in this environment. The assistant cannot yet determine whether speech is present.';
+      return;
+    }
     const effectiveSize = effectiveTranscriptionSourceSize();
     if (capability.provider && capability.provider.external && Number.isFinite(effectiveSize) && effectiveSize > CONNECTED_SERVICE_MAX_BYTES) {
       const usingExtractedAudio = Boolean(findExtractedAudioArtifact());
