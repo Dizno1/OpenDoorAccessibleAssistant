@@ -1,0 +1,21 @@
+INCREMENT 8 - START WORKFLOW UNBLOCKED
+
+Based on Increment 7 source files.
+
+Replace only js/app.js in your existing repository. Do not replace the repository folder or .git.
+
+Changes:
+- Start no longer refuses to build an accessibility workflow because Stage 1 speech detection is unknown.
+- Media Analysis no longer claims an unanswered question must be resolved before starting.
+- The unused workflow selection submit handler now invokes the automatic chain rather than requiring checkbox selection.
+- Start status describes outstanding verification without claiming it is complete.
+
+Limitations:
+- This is a workflow-unblocking repair, not proof that Whisper works on the user's CPU.
+- Audio-event and visual analysis are not implemented.
+- Other review checkboxes and some focus transitions remain.
+- The installer has not been built or tested on Windows.
+
+Validation: node --check js/app.js; npm run build:web; ZIP CRC.
+
+Suggested commit: Increment 8 - Unblock Start and automatic analysis

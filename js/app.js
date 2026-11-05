@@ -1089,7 +1089,7 @@
       return;
     }
 
-    mediaAnalysisSummary.textContent = `Media analysis is not yet complete. ${status.unresolved.length} question${status.unresolved.length === 1 ? '' : 's'} must be resolved before Make This Accessible can build an accurate plan.`;
+    mediaAnalysisSummary.textContent = 'Some media properties are not yet verified. Select Start to begin available analysis and accessibility work. No answer is required from you.';
     mediaAnalysisQuestions.innerHTML = status.questions.map((question) => {
       if (question.resolved) return describeResolvedQuestion(question);
       if (question.id === 'speech') {
@@ -1483,13 +1483,10 @@
     const text = String(value || '').trim().toLowerCase();
     const intents = currentRecommendations ? currentRecommendations.recommendations : window.IntentEngine.getIntents(currentInspection);
     if (/make .*accessible|accessib.*video|prepare .*publication|complete accessibility/.test(text)) {
-      // Stage 1 (docs/Stage 1 Engine-Orchestrated Analysis Directive.md) must resolve before a
-      // workflow is built — never construct a fixed transcript-caption-render chain just because
-      // the source is a video with an audio track.
+      // Start is the trigger for analysis, not a reward for completing it. Unknown
+      // speech must remain unknown, but must never become a user-facing prerequisite.
+      // The transcript step runs the available engine and can establish speech later.
       updateEngineFileCompatibility();
-      if (currentKnowledgeModel && !window.StageOneAnalysis.isReady(currentKnowledgeModel)) {
-        return { stageOneBlocked: true };
-      }
       const transcriptionNeeded = !currentKnowledgeModel || window.StageOneAnalysis.transcriptionNeeded(currentKnowledgeModel);
       const captionsNeeded = !currentKnowledgeModel || window.StageOneAnalysis.captionsNeeded(currentKnowledgeModel);
       const excluded = new Set();
@@ -1545,11 +1542,6 @@
       return;
     }
     const match = matchDirectGoal(requestedGoal);
-    if (match && match.stageOneBlocked) {
-      directGoalStatus.textContent = 'Media analysis is not yet complete for this source. Resolve the question in Media Analysis, above, before Make This Accessible can build an accurate plan.';
-      /* Focus remains with the user; status is announced without navigation. */
-      return;
-    }
     if (!match || (!match.intent && !match.chain)) {
       // Requests beyond what matchDirectGoal recognizes (translation, VPAT drafts, summaries, and
       // similar open-ended requests) are not yet interpreted by real language understanding — this
@@ -1587,7 +1579,7 @@
     activeWorkflowChain.status = 'running';
     activeWorkflowChain.startedAt = new Date().toISOString();
     workflowChainSection.hidden = true;
-    announceWorkflowStatus('Make This Accessible started. The application will continue automatically and pause only when your review is required.');
+    announceWorkflowStatus('Accessibility processing started. Media properties not yet verified will be assessed during processing where supported.');
     /* Focus remains with the user; status is announced without navigation. */
     continueWorkflowChain();
   }
@@ -1599,23 +1591,7 @@
 
   function submitWorkflowChain(event) {
     event.preventDefault();
-    if (!activeWorkflowChain) return;
-    const selected = new Set(Array.from(workflowChainSteps.querySelectorAll('input[name="workflowChainStep"]:checked')).map((input) => input.value));
-    activeWorkflowChain.steps.forEach((step) => {
-      if (!step.completed && !step.blocked) step.selected = selected.has(step.workflowId);
-    });
-    if (!window.WorkflowChain.selectedSteps(activeWorkflowChain).length) {
-      workflowChainStatus.textContent = 'Select at least one available workflow before starting the plan.';
-      const first = workflowChainSteps.querySelector('input:not(:disabled)');
-      if (first) first.focus();
-      return;
-    }
-    activeWorkflowChain.status = 'running';
-    activeWorkflowChain.startedAt = new Date().toISOString();
-    workflowChainSection.hidden = true;
-    announceWorkflowStatus('The accessibility plan started. The first workflow is being prepared.');
-    /* Focus remains with the user; status is announced without navigation. */
-    continueWorkflowChain();
+    if (activeWorkflowChain) startWorkflowChain(activeWorkflowChain);
   }
 
   function continueWorkflowChain() {
