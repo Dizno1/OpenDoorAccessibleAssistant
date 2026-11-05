@@ -46,6 +46,10 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Download and verify bundled transcription engines
+        shell: pwsh
+        run: ./scripts/prepare-windows-engines.ps1
+
       - name: Build Tauri NSIS installer
         run: npm run desktop:build
 

@@ -1,0 +1,9 @@
+Windows Increment 4 - Bundled Local Transcription Foundation
+
+This increment adds native Tauri commands for local transcription and a build-time engine preparation script. The GitHub Actions Windows installer workflow downloads FFmpeg, FFprobe, whisper.cpp and the English base model and bundles them with the installer. The transcript draft button uses these local tools before any connected service.
+
+Important verification status: JavaScript syntax and frontend build were checked in this environment. The Windows installer has not been compiled here, and the external downloads have not been verified here. A successful GitHub Actions build and a real local transcription test are required before describing this as a working production feature.
+
+Testing: Build the Windows installer from GitHub Actions. Install it. Select Original Video.MP4. Select Request transcript draft. Confirm that timestamped speech appears in the transcript field, that the speech matches the video, and that review and export work. A failed engine download must fail the installer build instead of silently creating an editor-only application.
+
+Limitations: The model is English-only. The app currently passes media through the Tauri bridge in base64, which increases memory use on large files. This increment does not implement PDF form remediation, model management/download after installation, cancellation, or transcript segment auto-population in the Timed Text Editor. These remain follow-up engineering tasks.

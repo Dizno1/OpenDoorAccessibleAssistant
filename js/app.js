@@ -530,6 +530,29 @@
   }
 
   async function requestTranscriptDraft() {
+    // The bundled local engine is first choice; it does not need cloud consent.
+    if (window.__TAURI__?.core?.invoke && currentFile instanceof File) {
+      draftTranscriptButton.disabled = true;
+      try {
+        const invoke = window.__TAURI__.core.invoke;
+        const engine = await invoke('transcription_engine_status');
+        if (!engine.ready) throw new Error(engine.details);
+        transcriptReviewStatus.textContent = 'Transcribing locally. This can take several minutes. Your file stays on this device.';
+        const bytes = new Uint8Array(await currentFile.arrayBuffer());
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
+        const srt = await invoke('transcribe_local', { fileName: currentFile.name, fileBase64: btoa(binary) });
+        if (!isUsableTranscriptText(srt)) throw new Error('The local engine returned no usable speech.');
+        // Keep timestamped SRT for review and downstream caption export.
+        transcriptTextInput.value = srt;
+        lastTranscriptProviderName = 'Bundled local Whisper engine';
+        transcriptReviewStatus.textContent = 'Local transcription finished. Timestamped speech is ready to review and save.';
+        transcriptTextInput.focus();
+      } catch (error) {
+        transcriptReviewStatus.textContent = `Local transcription could not finish: ${error.message || error}`;
+      } finally { draftTranscriptButton.disabled = false; }
+      return;
+    }
     const approval = confirmAssistanceUse('transcription-draft', transcriptReviewStatus);
     if (!approval) return;
     draftTranscriptButton.disabled = true;
