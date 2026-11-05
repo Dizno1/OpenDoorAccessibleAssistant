@@ -1,0 +1,5 @@
+Windows Increment 5 - Persistent workspace
+
+On Windows, importing a file creates a separate working copy under Documents/Open Door Accessible Assistant/Sources. The original remains untouched. Name collisions receive numbered filenames. Completed local transcription drafts are saved immediately under Documents/Open Door Accessible Assistant/Transcripts as SRT, independently of review or WebView storage. The application reports the saved file path near the file selection or transcript controls. This does not migrate existing WebView localStorage history or persist all other artifact types yet.
+
+Acceptance tests: import a video, locate its copy in Documents, restart/reinstall, confirm copy remains; import same filename twice and verify no overwrite; generate a transcript and locate its SRT; test JAWS announcements and focus.

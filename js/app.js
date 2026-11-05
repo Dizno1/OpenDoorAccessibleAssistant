@@ -545,8 +545,15 @@
         if (!isUsableTranscriptText(srt)) throw new Error('The local engine returned no usable speech.');
         // Keep timestamped SRT for review and downstream caption export.
         transcriptTextInput.value = srt;
+        // Persist the generated artifact independently of the review UI and WebView storage.
+        try {
+          const savedPath = await invoke('workspace_save_transcript', { fileName: currentFile.name, srt });
+          transcriptReviewStatus.textContent = `Local transcription finished. Transcript saved to ${savedPath}. Review the text below.`;
+        } catch (saveError) {
+          transcriptReviewStatus.textContent = `Transcription finished, but saving to Documents failed: ${saveError.message || saveError}. The text remains in the editor.`;
+        }
         lastTranscriptProviderName = 'Bundled local Whisper engine';
-        transcriptReviewStatus.textContent = 'Local transcription finished. Timestamped speech is ready to review and save.';
+
         transcriptTextInput.focus();
       } catch (error) {
         transcriptReviewStatus.textContent = `Local transcription could not finish: ${error.message || error}`;
@@ -771,6 +778,19 @@
     finally { draftImageDescriptionButton.disabled = false; }
   }
 
+  async function saveSourceToWorkspace(file) {
+    if (!window.__TAURI__?.core?.invoke || !(file instanceof File)) return;
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
+      const path = await window.__TAURI__.core.invoke('workspace_import', { fileName: file.name, fileBase64: btoa(binary) });
+      if (currentFile === file) contentHelp.textContent = `${file.name} selected. A working copy was saved to ${path}. Your original file is unchanged.`;
+    } catch (error) {
+      if (currentFile === file) contentHelp.textContent = `${file.name} selected. The original file is unchanged. Workspace copy failed: ${error.message || error}`;
+    }
+  }
+
   async function handleFile(file) {
     if (!file) return;
 
@@ -800,6 +820,8 @@
     contentInput.value = file.name;
     contentInput.dataset.loadedSource = file.name;
     contentHelp.textContent = `${file.name} selected. The file stays on this device.`;
+    // Store a discoverable working copy in Documents without changing the original.
+    void saveSourceToWorkspace(file);
 
     setStatus(`Checking ${file.name}.`);
     inspectionOutput.hidden = false;
