@@ -1,0 +1,16 @@
+WINDOWS INCREMENT 3 - TIMED TEXT EDITOR PROTOTYPE
+
+Implemented: keyboard-first timed text editing within the existing transcript review workflow.
+Import .srt or .vtt; navigate segments with Up/Down in list; Enter focuses text; Escape returns to list; Ctrl+PageUp and Ctrl+PageDown move directly between editable text; timings in collapsed details; export SRT or WebVTT.
+
+JAWS tests:
+1. Open transcript review. Import a known SRT or WebVTT file.
+2. Select segments with arrow keys. Press Enter, edit text, Ctrl+PageDown, edit next.
+3. Press Escape and verify focus returns to segment list.
+4. Expand timing details, edit valid HH:MM:SS.mmm values, export SRT and VTT.
+5. Confirm editing does not announce status on every keystroke.
+6. Check caption timing and text in exported files.
+
+NOT IMPLEMENTED: automatic Whisper provisioning, bundled FFmpeg, automatic transcription, PDF form remediation, or Windows installer validation. The original transcription provider workflow is unchanged.
+
+This is an editing prototype, not the promised self-managing processing platform.

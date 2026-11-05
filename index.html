@@ -116,6 +116,37 @@
           <p id="transcript-text-help" class="help-text">Include speaker names when useful and meaningful sounds in brackets, such as [music] or [door closes]. If you checked "little or no spoken dialogue" above, you can leave this blank, or note meaningful environmental sounds here.</p>
           <button type="button" id="draft-transcript">Request transcript draft</button>
         </div>
+        <div id="timed-text-editor" class="form-field" aria-labelledby="timed-editor-heading">
+          <h3 id="timed-editor-heading">Timed text editor</h3>
+          <p>Import SRT or WebVTT captions, or open timed text from the transcript field. Select a segment with Up or Down Arrow, press Enter to edit its text, and press Escape to return to the segment list. While editing, Ctrl+PageDown and Ctrl+PageUp move directly to the next or previous text segment. Timing is optional to inspect.</p>
+          <label for="timed-import">Import timed text file</label>
+          <input id="timed-import" type="file" accept=".srt,.vtt,text/plain">
+          <button type="button" id="timed-open">Open timed text from transcript field</button>
+          <div id="timed-workspace" hidden>
+            <label for="timed-segment-list">Segments</label>
+            <select id="timed-segment-list" size="6" aria-describedby="timed-segment-info"></select>
+            <p id="timed-segment-info"></p>
+            <label for="timed-segment-text">Selected segment text</label>
+            <textarea id="timed-segment-text" rows="5"></textarea>
+            <div class="next-actions">
+              <button type="button" id="timed-previous">Previous segment text</button>
+              <button type="button" id="timed-next">Next segment text</button>
+            </div>
+            <details>
+              <summary>Timing for selected segment</summary>
+              <label for="timed-segment-start">Start time, HH:MM:SS.mmm</label>
+              <input id="timed-segment-start" type="text" inputmode="text">
+              <label for="timed-segment-end">End time, HH:MM:SS.mmm</label>
+              <input id="timed-segment-end" type="text" inputmode="text">
+            </details>
+            <div class="next-actions">
+              <button type="button" id="timed-save">Copy segments into transcript field</button>
+              <button type="button" id="timed-export-srt">Export SRT</button>
+              <button type="button" id="timed-export-vtt">Export WebVTT</button>
+            </div>
+          </div>
+          <p id="timed-editor-status" role="status" aria-live="polite"></p>
+        </div>
         <label class="confirmation-option">
           <input id="transcript-reviewed" type="checkbox">
           <span id="transcript-reviewed-label-text">I reviewed this transcript for accuracy and completeness.</span>
@@ -653,6 +684,7 @@
   <script src="js/accessible-player.js"></script>
   <script src="js/desktop-shortcuts.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/timed-text-editor.js"></script>
   <script src="js/publication-pipeline.js"></script>
 
 </body>
